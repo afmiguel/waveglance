@@ -5,6 +5,11 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.11.1 — 2026-11-07
+
+- The Open file dialog lists .bin and .vcd files too (before, they were
+  only under "All files").
+
 ## 0.11.0 — 2026-11-07
 
 - **Keysight / Agilent `.bin`** files (InfiniiVision and others, versions
