@@ -5,6 +5,14 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.4.0 — 2026-11-07
+
+- FFT (∿ FFT menu): the spectrum of CH1 or CH2 under the time plot, of the
+  samples shown in the time plot. Windows: Rectangular, Hanning, Hamming,
+  Blackman-Harris, Flat top. Scale: dBV or V RMS (a sine of amplitude A reads
+  A/√2). Peak readout with the frequency interpolated between bins, Δf and
+  the number of samples. The settings are saved between sessions.
+
 ## 0.3.0 — 2026-11-07
 
 - Zoom view (🔍 Zoom button): an overview of the whole record above the

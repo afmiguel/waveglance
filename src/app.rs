@@ -1,6 +1,7 @@
 //! Oscilloscope-style user interface.
 
 use crate::cursors::{self, CursorMode, Cursors};
+use crate::fft;
 use crate::measure::{self, Measurement, Unit};
 use crate::parser::{self, Acquisition, Waveform};
 use eframe::egui::{self, Color32, RichText};
@@ -33,6 +34,12 @@ const GIT_HASH: &str = env!("GIT_HASH");
 const MEASURE_KEY: &str = "measure";
 /// Storage key of "do not show the splash screen at startup".
 const HIDE_SPLASH_KEY: &str = "hide_splash";
+/// Storage key of the FFT settings.
+const FFT_KEY: &str = "fft";
+/// Part of the plot area used by the time plot when the FFT is shown.
+const TIME_PLOT_SHARE: f32 = 0.55;
+/// Min/max pairs drawn in the FFT plot.
+const FFT_BUCKETS: usize = 2000;
 /// Storage key of the zoom view (overview strip) switch.
 const ZOOM_VIEW_KEY: &str = "zoom_view";
 /// Height of the overview strip, in points.
@@ -117,6 +124,34 @@ enum ViewCommand {
     ZoomX { factor: f64, at: f64 },
 }
 
+/// FFT settings (saved between sessions).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct FftSettings {
+    /// Show the FFT panel under the time plot.
+    pub show: bool,
+    /// Source channel: 0 = CH1, 1 = CH2.
+    pub source: usize,
+    pub window: fft::Window,
+    /// Level in dBV (true) or in volts RMS (false).
+    pub db: bool,
+}
+
+impl Default for FftSettings {
+    fn default() -> Self {
+        Self {
+            show: false,
+            source: 0,
+            window: fft::Window::Hanning,
+            db: true,
+        }
+    }
+}
+
+/// What a computed spectrum depends on: file, channel, window and the time
+/// span (as bits, so that the key can be compared exactly).
+type FftKey = (u64, usize, fft::Window, u64, u64);
+
 /// Application state.
 pub struct ScopeApp {
     /// CH1 points `[time_s, volts]`.
@@ -153,6 +188,10 @@ pub struct ScopeApp {
     zoom_view: bool,
     /// View change from the overview strip, for the next frame.
     pending_view: Option<ViewCommand>,
+    /// FFT panel settings.
+    fft: FftSettings,
+    /// The last spectrum and what it was computed from.
+    fft_cache: Option<(FftKey, Option<fft::Spectrum>)>,
     /// CH1 and CH2 shown on the screen (a click on the OSD readout hides or
     /// shows a channel, like the channel button of a scope).
     visible: [bool; 2],
@@ -206,6 +245,11 @@ impl ScopeApp {
                 .and_then(|s| eframe::get_value(s, ZOOM_VIEW_KEY))
                 .unwrap_or(false),
             pending_view: None,
+            fft: cc
+                .storage
+                .and_then(|s| eframe::get_value(s, FFT_KEY))
+                .unwrap_or_default(),
+            fft_cache: None,
             visible: [true, true],
             last_transform: None,
             inbox_tx,
@@ -542,6 +586,20 @@ impl ScopeApp {
                 {
                     self.zoom_view = !self.zoom_view;
                 }
+            });
+            ui.add_space(8.0);
+            ui.add_enabled_ui(loaded, |ui| {
+                let label = if self.fft.show {
+                    format!("∿ FFT: CH{} ▾", self.fft_source().map_or(1, |i| i + 1))
+                } else {
+                    "∿ FFT ▾".to_owned()
+                };
+                let config = egui::containers::menu::MenuConfig::new()
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+                let (button, _) = egui::containers::menu::MenuButton::new(label)
+                    .config(config)
+                    .ui(ui, |ui| self.fft_menu(ui));
+                button.on_hover_text("Spectrum of a channel (FFT) under the plot");
             });
             ui.add_space(8.0);
             // Cursor menu: the button shows the mode in use.
@@ -1008,6 +1066,216 @@ impl ScopeApp {
         }
     }
 
+    /// The FFT source channel: the chosen one if the file has it, else the
+    /// other one. `None` without a channel.
+    fn fft_source(&self) -> Option<usize> {
+        let w = self.waveform.as_ref()?;
+        let present = [w.ch1.is_some(), w.ch2.is_some()];
+        if present[self.fft.source.min(1)] {
+            Some(self.fft.source.min(1))
+        } else {
+            present.iter().position(|&p| p)
+        }
+    }
+
+    /// Contents of the FFT menu.
+    fn fft_menu(&mut self, ui: &mut egui::Ui) {
+        let present = self
+            .waveform
+            .as_ref()
+            .map_or([true, true], |w| [w.ch1.is_some(), w.ch2.is_some()]);
+        ui.checkbox(&mut self.fft.show, "Show FFT");
+        ui.separator();
+        ui.label("Source:");
+        ui.horizontal(|ui| {
+            for (i, (name, color)) in [("CH1", CH1_COLOR), ("CH2", CH2_COLOR)]
+                .into_iter()
+                .enumerate()
+            {
+                if ui
+                    .add_enabled(
+                        present[i],
+                        egui::RadioButton::new(
+                            self.fft.source == i,
+                            RichText::new(name).color(color),
+                        ),
+                    )
+                    .on_disabled_hover_text(format!("{name} is off in this file"))
+                    .clicked()
+                {
+                    self.fft.source = i;
+                }
+            }
+        });
+        ui.label("Window:");
+        for w in fft::Window::ALL {
+            ui.radio_value(&mut self.fft.window, w, w.label())
+                .on_hover_text(w.description());
+        }
+        ui.label("Scale:");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.fft.db, true, "dBV")
+                .on_hover_text("Decibels relative to 1 V RMS");
+            ui.radio_value(&mut self.fft.db, false, "V RMS");
+        });
+        ui.separator();
+        ui.label(
+            RichText::new("The FFT uses the samples shown in the time plot.")
+                .small()
+                .color(Color32::GRAY),
+        );
+    }
+
+    /// The spectrum of the source channel over the visible time span, from
+    /// the cache when nothing changed: (channel, spectrum, samples used).
+    fn current_spectrum(&mut self) -> Option<(usize, fft::Spectrum, usize)> {
+        let source = self.fft_source()?;
+        let w = self.waveform.as_ref()?;
+        let ch = [&w.ch1, &w.ch2][source].as_ref()?;
+        let record = ch.points.first()?[0]..=ch.points.last()?[0];
+        let span = self
+            .last_transform
+            .as_ref()
+            .map_or(record, |t| t.bounds().range_x());
+        let a = ch.points.partition_point(|p| p[0] < *span.start());
+        let b = ch.points.partition_point(|p| p[0] <= *span.end());
+        let count = b.saturating_sub(a);
+        let key: FftKey = (
+            self.load_count,
+            source,
+            self.fft.window,
+            span.start().to_bits(),
+            span.end().to_bits(),
+        );
+        if self.fft_cache.as_ref().map(|c| c.0) != Some(key) {
+            let values: Vec<f64> = ch.points[a..b.max(a)].iter().map(|p| p[1]).collect();
+            let dt = ch.sample_interval().unwrap_or(0.0);
+            self.fft_cache = Some((key, fft::spectrum(&values, dt, self.fft.window)));
+        }
+        let spectrum = self.fft_cache.as_ref()?.1.clone()?;
+        Some((source, spectrum, count.min(fft::MAX_SAMPLES)))
+    }
+
+    /// The FFT panel: a header with the peak, and the spectrum plot.
+    fn fft_view(&mut self, ui: &mut egui::Ui) {
+        let Some((source, spectrum, count)) = self.current_spectrum() else {
+            ui.label(
+                RichText::new("FFT: not enough samples in the time span shown")
+                    .color(Color32::GRAY),
+            );
+            return;
+        };
+        let color = [CH1_COLOR, CH2_COLOR][source];
+        let db = self.fft.db;
+        let level = move |v: f64| if db { fft::dbv(v) } else { v };
+        let fmt_level = move |v: f64| {
+            if db {
+                format!("{:.1} dBV", fft::dbv(v))
+            } else {
+                fmt_sig(v, "V", READOUT_DIGITS, 0.0)
+            }
+        };
+        let peak = spectrum.peak();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "FFT CH{} · {}",
+                    source + 1,
+                    self.fft.window.label()
+                ))
+                .monospace()
+                .strong()
+                .color(color),
+            );
+            if let Some((pf, pv)) = peak {
+                readout(
+                    ui,
+                    "Peak",
+                    Some(format!(
+                        "{} {}",
+                        fmt_sig(pf, "Hz", READOUT_DIGITS, 0.0),
+                        fmt_level(pv)
+                    )),
+                    color,
+                );
+            }
+            if let Some(df) = spectrum.resolution() {
+                readout(
+                    ui,
+                    "Δf",
+                    Some(fmt_sig(df, "Hz", 3, 0.0)),
+                    Color32::LIGHT_GRAY,
+                )
+                .on_hover_text("Frequency step between the FFT bins");
+            }
+            readout(ui, "N", Some(count.to_string()), Color32::LIGHT_GRAY)
+                .on_hover_text("Samples used (the time span shown)");
+        });
+        let points: Vec<[f64; 2]> = spectrum
+            .freqs
+            .iter()
+            .zip(&spectrum.vrms)
+            .map(|(&f, &v)| [f, level(v)])
+            .collect();
+        let points = decimate(&points, FFT_BUCKETS);
+        // Start view: up to the 20th harmonic of the peak (the whole span up
+        // to half the sample rate is often far wider than the signal).
+        let nyquist = spectrum.freqs.last().copied().unwrap_or(1.0);
+        let f_max = peak.map_or(nyquist, |(pf, _)| {
+            (pf * 20.0).clamp(nyquist / 1000.0, nyquist)
+        });
+        let mut plot = Plot::new(("fft", self.load_count, source, db))
+            .show_grid(true)
+            .grid_color(GRID_COLOR)
+            .x_axis_label("Frequency")
+            .x_axis_formatter(|mark, _| si(mark.value, "Hz"))
+            .default_x_bounds(0.0, f_max)
+            .allow_scroll(false)
+            .label_formatter(move |hover: &HoverPosition<'_>| {
+                let p = match hover {
+                    HoverPosition::NearDataPoint { position, .. } => position,
+                    HoverPosition::Elsewhere { position, .. } => position,
+                };
+                let y = if db {
+                    format!("{:.1} dBV", p.y)
+                } else {
+                    si(p.y, "V")
+                };
+                Some(format!("f = {}\n{y}", si(p.x, "Hz")))
+            });
+        plot = if db {
+            plot.y_axis_label("dBV")
+                .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        } else {
+            plot.y_axis_label("V RMS")
+                .y_axis_formatter(|mark, _| si(mark.value, "V"))
+        };
+        plot.show(ui, |plot| {
+            // Mouse wheel zooms, like the time plot.
+            let (delta, modifiers) = plot.ctx().input(|i| (wheel_delta(i), i.modifiers));
+            let amount = delta.x + delta.y;
+            if amount != 0.0 && plot.response().hovered() {
+                let f = (amount / WHEEL_ZOOM_POINTS).exp();
+                let factor = if modifiers.shift {
+                    egui::vec2(f, 1.0)
+                } else if modifiers.alt {
+                    egui::vec2(1.0, f)
+                } else {
+                    egui::vec2(f, f)
+                };
+                plot.zoom_bounds_around_hovered(factor);
+            }
+            plot.line(Line::new("FFT", points).color(color).width(1.2));
+            if let Some((pf, pv)) = peak {
+                plot.points(
+                    egui_plot::Points::new("", vec![[pf, level(pv)]])
+                        .radius(4.0)
+                        .color(Color32::WHITE),
+                );
+            }
+        });
+    }
+
     fn scope_screen(&mut self, ui: &mut egui::Ui) {
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         if self.waveform.is_none() || hovering {
@@ -1034,8 +1302,13 @@ impl ScopeApp {
             ui.add_space(4.0);
         }
         let view_command = self.pending_view.take();
-        // The plot and its axis labels fill this area.
-        let outer = ui.available_rect_before_wrap();
+        // The plot and its axis labels fill this area (the upper part when
+        // the FFT is shown).
+        let mut outer = ui.available_rect_before_wrap();
+        let show_fft = self.fft.show && self.fft_source().is_some();
+        if show_fft {
+            outer.max.y = outer.min.y + outer.height() * TIME_PLOT_SHARE;
+        }
         let divisions = self.y_axis == YAxis::Divisions;
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
         plot = if divisions {
@@ -1065,6 +1338,9 @@ impl ScopeApp {
             plot.y_axis_label("Voltage")
                 .y_axis_formatter(|mark, _| si(mark.value, "V"))
         };
+        if show_fft {
+            plot = plot.height(outer.height());
+        }
         let response = plot
             .allow_drag(allow_pan)
             .show_grid(true)
@@ -1205,6 +1481,10 @@ impl ScopeApp {
             ui.ctx().request_repaint();
         }
         self.last_transform = Some(response.transform);
+        if show_fft {
+            ui.add_space(4.0);
+            self.fft_view(ui);
+        }
     }
 }
 
@@ -1252,6 +1532,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, Y_AXIS_KEY, &self.y_axis);
         eframe::set_value(storage, HIDE_SPLASH_KEY, &self.hide_splash);
         eframe::set_value(storage, ZOOM_VIEW_KEY, &self.zoom_view);
+        eframe::set_value(storage, FFT_KEY, &self.fft);
     }
 }
 
@@ -1491,6 +1772,17 @@ fn help_text(ui: &mut egui::Ui) {
             "Time: two vertical lines T1, T2. Readout: T1, T2, ΔT, 1/ΔT, and each channel's voltage at T1 and T2.",
             "Volt: two horizontal lines V1, V2. Readout: V1, V2, ΔV (in Div mode, in the volts of each channel).",
             "Drag a dashed line to move it. Bring to view moves lost cursors back to the screen.",
+        ],
+    );
+    section(
+        ui,
+        "Spectrum (∿ FFT menu)",
+        &[
+            "Show FFT: the spectrum of one channel under the time plot, of the samples shown in the time plot (zoom in to analyse a part).",
+            "Window: Hanning for general use; Rectangular for transients; Blackman-Harris for small harmonics; Flat top for accurate levels.",
+            "Scale: dBV (0 dBV = 1 V RMS) or V RMS. A sine of amplitude A reads A/√2 V RMS.",
+            "Peak: the highest line above DC (white dot); its frequency is interpolated between bins. Δf: the frequency step; a longer time span gives a finer step.",
+            "The FFT plot opens up to 20 × the peak frequency; double-click it to return there; zoom out to see up to half the sample rate.",
         ],
     );
     section(

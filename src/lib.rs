@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod cursors;
+pub mod fft;
 pub mod fnirsi1013d;
 pub mod measure;
 pub mod parser;

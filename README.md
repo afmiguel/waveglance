@@ -34,6 +34,10 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
   dashed cursor line to move it.
   Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
   (linear interpolation). Voltage cursors show V1, V2 and ΔV.
+- **∿ FFT ▾** menu: spectrum of CH1 or CH2 under the plot, of the samples
+  shown in the time plot (zoom in to analyse a part). Windows Rectangular,
+  Hanning, Hamming, Blackman-Harris and Flat top; scale dBV or V RMS; peak
+  readout (frequency interpolated between bins), Δf and N.
 - **📏 Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
   Vmax, Vmin, Vtop, Vbase, Vamp, Mean, RMS, Rise, Fall, +Width, −Width, +Duty),
   the channels, and the samples to measure: **Screen** (the time span shown

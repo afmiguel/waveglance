@@ -185,3 +185,30 @@ fn measurements_of_the_100khz_square() {
         assert!((vamp - 0.94).abs() < 0.1, "{window:?}: Vamp = {vamp}");
     }
 }
+
+#[test]
+fn fft_of_the_100khz_square() {
+    // Square wave ±0.467 V (Vtop/Vbase): the fundamental is at 100 kHz with
+    // an amplitude of 4/π × 0.467 V, so 0.42 V RMS.
+    use fnirsi_viewer::fft::{Window, spectrum};
+    let w = load("100kHZ-1V.wav");
+    let ch1 = w.ch1.as_ref().unwrap();
+    let values: Vec<f64> = ch1.points.iter().map(|p| p[1]).collect();
+    let dt = ch1.points[1][0] - ch1.points[0][0];
+    // Frequency: Hanning, interpolated between the 6.1 kHz bins.
+    let (f, _) = spectrum(&values, dt, Window::Hanning)
+        .unwrap()
+        .peak()
+        .unwrap();
+    assert!((f - 100e3).abs() < 1e3, "peak at {f} Hz");
+    // Level: Flat top (accurate amplitude).
+    let (_, v) = spectrum(&values, dt, Window::FlatTop)
+        .unwrap()
+        .peak()
+        .unwrap();
+    let expected = 4.0 / std::f64::consts::PI * 0.467 / std::f64::consts::SQRT_2;
+    assert!(
+        (v - expected).abs() < 0.03,
+        "{v} V RMS, expected {expected}"
+    );
+}
