@@ -3,22 +3,13 @@
 use crate::cursors::{self, CursorMode, Cursors};
 use crate::fft;
 use crate::measure::{self, Measurement, Unit};
+use crate::palette;
 use crate::parser::{self, Acquisition, Waveform};
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{HoverPosition, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
 use std::ops::RangeInclusive;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-const CH1_COLOR: Color32 = Color32::from_rgb(255, 235, 0); // bright yellow
-const CH2_COLOR: Color32 = Color32::from_rgb(0, 230, 255); // bright cyan
-const TRIGGER_COLOR: Color32 = Color32::from_rgb(255, 140, 0);
-const SCREEN_BG: Color32 = Color32::from_rgb(10, 10, 10);
-const GRID_COLOR: Color32 = Color32::from_rgb(90, 90, 90);
-/// Readouts of a channel that is off, and other inactive text.
-const OFF_COLOR: Color32 = Color32::from_rgb(110, 110, 110);
-/// Measurements that a clipped signal makes unreliable.
-const WARN_COLOR: Color32 = Color32::from_rgb(255, 150, 60);
-const ERROR_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
 /// Significant digits of the measurement and cursor readouts.
 const READOUT_DIGITS: i32 = 4;
 /// Screen points for one wheel "line" (one notch of a mouse wheel on desktop).
@@ -34,6 +25,8 @@ const GIT_HASH: &str = env!("GIT_HASH");
 const MEASURE_KEY: &str = "measure";
 /// Storage key of "do not show the splash screen at startup".
 const HIDE_SPLASH_KEY: &str = "hide_splash";
+/// Storage key of the screen theme (white background).
+const LIGHT_THEME_KEY: &str = "light_theme";
 /// Storage key of the FFT settings.
 const FFT_KEY: &str = "fft";
 /// Part of the plot area used by the time plot when the FFT is shown.
@@ -122,6 +115,10 @@ enum ViewCommand {
     CenterX(f64),
     /// Multiply the visible time span by `factor`, keeping time `at` fixed.
     ZoomX { factor: f64, at: f64 },
+    /// Multiply the visible time span by `factor` around its centre (keys + and −).
+    ZoomCenter(f64),
+    /// Move the view by fractions of its width and height (arrow keys).
+    Pan { x: f64, y: f64 },
 }
 
 /// FFT settings (saved between sessions).
@@ -188,6 +185,16 @@ pub struct ScopeApp {
     zoom_view: bool,
     /// View change from the overview strip, for the next frame.
     pending_view: Option<ViewCommand>,
+    /// White screen (for printing) instead of black.
+    light_theme: bool,
+    /// Div mode: how far the user moved each channel (divisions), by dragging
+    /// its ground marker. Reset when a file is opened.
+    ground_shift: [f64; 2],
+    /// The ground marker that the pointer is dragging (0 = CH1, 1 = CH2).
+    marker_drag: Option<usize>,
+    /// Tab presses taken from egui while cursors are on (they select the
+    /// next cursor instead of moving the keyboard focus between buttons).
+    tab_presses: usize,
     /// FFT panel settings.
     fft: FftSettings,
     /// The last spectrum and what it was computed from.
@@ -205,10 +212,22 @@ pub struct ScopeApp {
 
 impl ScopeApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_theme(egui::Theme::Dark);
-        let mut visuals = egui::Visuals::dark();
-        visuals.extreme_bg_color = SCREEN_BG; // egui_plot background
-        cc.egui_ctx.set_visuals_of(egui::Theme::Dark, visuals);
+        // Both themes: the plot background is the scope screen colour.
+        let mut dark = egui::Visuals::dark();
+        dark.extreme_bg_color = egui::Color32::from_rgb(10, 10, 10);
+        cc.egui_ctx.set_visuals_of(egui::Theme::Dark, dark);
+        let mut light = egui::Visuals::light();
+        light.extreme_bg_color = egui::Color32::WHITE;
+        cc.egui_ctx.set_visuals_of(egui::Theme::Light, light);
+        let light_theme: bool = cc
+            .storage
+            .and_then(|s| eframe::get_value(s, LIGHT_THEME_KEY))
+            .unwrap_or(false);
+        cc.egui_ctx.set_theme(if light_theme {
+            egui::Theme::Light
+        } else {
+            egui::Theme::Dark
+        });
 
         let measure = cc
             .storage
@@ -250,6 +269,10 @@ impl ScopeApp {
                 .and_then(|s| eframe::get_value(s, FFT_KEY))
                 .unwrap_or_default(),
             fft_cache: None,
+            light_theme,
+            ground_shift: [0.0; 2],
+            marker_drag: None,
+            tab_presses: 0,
             visible: [true, true],
             last_transform: None,
             inbox_tx,
@@ -272,6 +295,8 @@ impl ScopeApp {
                 self.waveform = Some(w);
                 self.error = None;
                 self.load_count += 1;
+                self.ground_shift = [0.0; 2];
+                self.marker_drag = None;
                 // New file: cursors at 1/4 and 3/4 of the waveform.
                 let [d1, d2] = self.plot_data();
                 let channels = [d1.as_slice(), d2.as_slice()];
@@ -300,7 +325,11 @@ impl ScopeApp {
             ch.as_ref()
                 .filter(|_| self.visible[i])
                 .map(|c| match self.y_axis {
-                    YAxis::Divisions => YMap::divisions(c),
+                    YAxis::Divisions => {
+                        let mut m = YMap::divisions(c);
+                        m.offset += self.ground_shift[i];
+                        m
+                    }
                     YAxis::Volts => YMap::IDENTITY,
                 })
         };
@@ -343,6 +372,17 @@ impl ScopeApp {
             self.set_y_axis(y_axis);
             ui.close();
         }
+        if self.ground_shift != [0.0; 2] {
+            ui.separator();
+            if ui
+                .button("Reset channel positions")
+                .on_hover_text("Put the ground markers back where the scope had them")
+                .clicked()
+            {
+                self.ground_shift = [0.0; 2];
+                ui.close();
+            }
+        }
     }
 
     /// A file could not be opened. The file shown before (if any) stays, and
@@ -369,7 +409,7 @@ impl ScopeApp {
             ui.label(
                 RichText::new(format!("Version {VERSION} · commit {GIT_HASH}"))
                     .small()
-                    .color(Color32::GRAY),
+                    .color(palette::hint()),
             );
             ui.add_space(6.0);
             ui.label(
@@ -389,8 +429,13 @@ impl ScopeApp {
                         ("Drag", "Pan"),
                         ("Double-click", "Reset the view"),
                         ("Drag a dashed line", "Move a cursor (⌖ Cursors menu)"),
+                        ("Drag 1▶ / 2▶ (Div)", "Move that channel up or down"),
                         ("Click CH1 / CH2 readout", "Hide or show the channel"),
                         ("Touch", "Pinch: zoom · drag: pan · double-tap: reset"),
+                        (
+                            "Keys",
+                            "F fit · Z zoom view · S FFT · C cursors · Tab + arrows move a cursor",
+                        ),
                         ("Esc", "Close this screen or an error message"),
                     ] {
                         ui.label(RichText::new(what).monospace());
@@ -403,14 +448,14 @@ impl ScopeApp {
             ui.label(
                 RichText::new("The Help button shows these controls and more.")
                     .small()
-                    .color(Color32::GRAY),
+                    .color(palette::hint()),
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button("📂 Open file…").clicked() {
+                if ui.button("⏏ Open file…").clicked() {
                     open_file = true;
                 }
-                if ui.button("❓ Help").clicked() {
+                if ui.button("❔ Help").clicked() {
                     self.splash_open = false;
                     self.help_open = true;
                 }
@@ -454,7 +499,9 @@ impl ScopeApp {
             if ui.button("✕").on_hover_text("Close this message").clicked() {
                 close = true;
             }
-            ui.add(egui::Label::new(RichText::new(format!("⚠ {err}")).color(ERROR_COLOR)).wrap());
+            ui.add(
+                egui::Label::new(RichText::new(format!("⚠ {err}")).color(palette::error())).wrap(),
+            );
         });
         if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.error = None;
@@ -540,18 +587,18 @@ impl ScopeApp {
                 Some(w) => format!("FNIRSI {}", w.model.name()),
                 None => "FNIRSI Viewer".to_owned(),
             };
-            ui.label(RichText::new(title).strong().color(Color32::LIGHT_GRAY))
+            ui.label(RichText::new(title).strong().color(palette::fg_dim()))
                 .on_hover_text("Supported: DPOX180H, 1013D and 1014D (original firmware)");
             // Version, discreet: identifies the build (also between releases).
             ui.label(
                 RichText::new(format!("v{VERSION}"))
                     .small()
-                    .color(Color32::from_rgb(130, 130, 130)),
+                    .color(palette::hint()),
             )
             .on_hover_text(format!("fnirsi-viewer {VERSION}, commit {GIT_HASH}"));
             ui.add_space(8.0);
             if ui
-                .button("📂 Open file…")
+                .button("⏏ Open file…")
                 .on_hover_text("Open a FNIRSI .wav file (or drop it on the window)")
                 .clicked()
             {
@@ -577,7 +624,7 @@ impl ScopeApp {
             ui.add_space(8.0);
             ui.add_enabled_ui(loaded, |ui| {
                 if ui
-                    .selectable_label(self.zoom_view, "🔍 Zoom")
+                    .selectable_label(self.zoom_view, "⊕ Zoom")
                     .on_hover_text(
                         "Zoom view: an overview of the whole record above the plot. \
                          Click or drag in it to move, wheel to zoom.",
@@ -617,13 +664,28 @@ impl ScopeApp {
             // Stay open while items are ticked; close on a click outside the menu.
             let config = egui::containers::menu::MenuConfig::new()
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-            let (button, _) = egui::containers::menu::MenuButton::new("📏 Measure ▾")
+            let (button, _) = egui::containers::menu::MenuButton::new("▤ Measure ▾")
                 .config(config)
                 .ui(ui, |ui| self.measure_menu(ui));
             button.on_hover_text("Choose the automatic measurements to show");
             ui.add_space(8.0);
+            let (theme_label, theme_tip) = if self.light_theme {
+                ("◐ Black", "Black screen, like the scope")
+            } else {
+                ("◐ White", "White screen with darker traces, for printing")
+            };
+            if ui.button(theme_label).on_hover_text(theme_tip).clicked() {
+                self.light_theme = !self.light_theme;
+                palette::set_light(self.light_theme);
+                ui.ctx().set_theme(if self.light_theme {
+                    egui::Theme::Light
+                } else {
+                    egui::Theme::Dark
+                });
+            }
+            ui.add_space(8.0);
             if ui
-                .button("❓ Help")
+                .button("❔ Help")
                 .on_hover_text("How to use the viewer: controls, cursors, measurements")
                 .clicked()
             {
@@ -690,7 +752,7 @@ impl ScopeApp {
         ui.label(
             RichText::new("Drag a dashed cursor line to move it.")
                 .small()
-                .color(Color32::GRAY),
+                .color(palette::hint()),
         );
     }
 
@@ -710,8 +772,8 @@ impl ScopeApp {
         ui.horizontal_wrapped(|ui| {
             // Channel readouts are buttons: a click hides or shows the trace.
             for (i, (name, vdiv, probe, color)) in [
-                ("CH1", self.ch1_v_div, &ch1_probe, CH1_COLOR),
-                ("CH2", self.ch2_v_div, &ch2_probe, CH2_COLOR),
+                ("CH1", self.ch1_v_div, &ch1_probe, palette::ch1()),
+                ("CH2", self.ch2_v_div, &ch2_probe, palette::ch2()),
             ]
             .into_iter()
             .enumerate()
@@ -725,24 +787,24 @@ impl ScopeApp {
                     self.visible[i] = !self.visible[i];
                 }
             }
-            readout(ui, "H", self.timebase.map(|t| format!("{}/div", si(t, "s"))), Color32::WHITE);
+            readout(ui, "H", self.timebase.map(|t| format!("{}/div", si(t, "s"))), palette::fg());
 
             let Some(w) = &self.waveform else { return };
             let mode = match w.acquisition {
                 Acquisition::RealTime { sample_rate_hz } => format!("{}Sa/s", si_bare(sample_rate_hz)),
                 Acquisition::Equivalent { frames } => format!("ETS · frame 1 of {frames}"),
             };
-            readout(ui, "MODE", Some(mode), Color32::LIGHT_GRAY);
+            readout(ui, "MODE", Some(mode), palette::fg_dim());
             if let Some(t) = &w.trigger {
                 let edge = if t.rising { "↑" } else { "↓" };
                 readout(
                     ui,
                     "TRIG",
                     Some(format!("{} {edge} CH{}", t.mode, t.source)),
-                    TRIGGER_COLOR,
+                    palette::trigger(),
                 );
             }
-            readout(ui, "PTS", Some(w.samples_per_channel.to_string()), Color32::LIGHT_GRAY);
+            readout(ui, "PTS", Some(w.samples_per_channel.to_string()), palette::fg_dim());
 
             let clipped: Vec<&str> = [("CH1", &w.ch1), ("CH2", &w.ch2)]
                 .iter()
@@ -750,11 +812,11 @@ impl ScopeApp {
                 .map(|(n, _)| *n)
                 .collect();
             if !clipped.is_empty() {
-                ui.label(RichText::new(format!("⚠ {} clipped", clipped.join(", "))).color(ERROR_COLOR))
+                ui.label(RichText::new(format!("⚠ {} clipped", clipped.join(", "))).color(palette::error()))
                     .on_hover_text("The signal reaches the limit of the input range: amplitude measurements are marked with \"?\"");
             }
             for warning in &w.warnings {
-                ui.label(RichText::new(format!("⚠ {warning}")).color(Color32::from_rgb(255, 180, 0)));
+                ui.label(RichText::new(format!("⚠ {warning}")).color(palette::warn_text()));
             }
             // A normal wrapped label: it goes to the next line on a narrow window
             // instead of overlapping the readouts.
@@ -771,7 +833,7 @@ impl ScopeApp {
         let m = &mut self.measure;
         ui.horizontal(|ui| {
             ui.label("Channels:");
-            for (i, (name, color)) in [("CH1", CH1_COLOR), ("CH2", CH2_COLOR)]
+            for (i, (name, color)) in [("CH1", palette::ch1()), ("CH2", palette::ch2())]
                 .into_iter()
                 .enumerate()
             {
@@ -855,9 +917,12 @@ impl ScopeApp {
             return;
         };
         let Some(w) = &self.waveform else { return };
-        for (i, (name, ch, color)) in [("CH1", &w.ch1, CH1_COLOR), ("CH2", &w.ch2, CH2_COLOR)]
-            .into_iter()
-            .enumerate()
+        for (i, (name, ch, color)) in [
+            ("CH1", &w.ch1, palette::ch1()),
+            ("CH2", &w.ch2, palette::ch2()),
+        ]
+        .into_iter()
+        .enumerate()
         {
             let Some(ch) = ch else { continue };
             if !self.measure.channels[i] || !self.visible[i] {
@@ -877,7 +942,7 @@ impl ScopeApp {
                     // A clipped signal hides its real peaks: voltage values
                     // are not reliable (the real Vpp is larger).
                     if clipped && m.unit() == Unit::Volt {
-                        readout(ui, m.label(), Some(format!("?{value}")), WARN_COLOR).on_hover_text(
+                        readout(ui, m.label(), Some(format!("?{value}")), palette::warn()).on_hover_text(
                             format!("{}\n⚠ {name} is clipped in this window: the real value can be larger", m.description()),
                         );
                     } else {
@@ -905,7 +970,7 @@ impl ScopeApp {
         let c = &self.cursors;
         if c.mode.shows_time() {
             ui.horizontal_wrapped(|ui| {
-                let color = cursors::TIME_COLOR;
+                let color = palette::time_cursor();
                 let fmt_t = |t| fmt_sig(t, "s", READOUT_DIGITS, 0.0);
                 readout(ui, "T1", Some(fmt_t(c.t[0])), color);
                 readout(ui, "T2", Some(fmt_t(c.t[1])), color);
@@ -920,10 +985,12 @@ impl ScopeApp {
                     color,
                 );
                 let Some(w) = &self.waveform else { return };
-                for (i, (name, ch, color)) in
-                    [("CH1", &w.ch1, CH1_COLOR), ("CH2", &w.ch2, CH2_COLOR)]
-                        .into_iter()
-                        .enumerate()
+                for (i, (name, ch, color)) in [
+                    ("CH1", &w.ch1, palette::ch1()),
+                    ("CH2", &w.ch2, palette::ch2()),
+                ]
+                .into_iter()
+                .enumerate()
                 {
                     let Some(ch) = ch.as_ref().filter(|_| self.visible[i]) else {
                         continue;
@@ -942,7 +1009,7 @@ impl ScopeApp {
         }
         if c.mode.shows_volt() {
             ui.horizontal_wrapped(|ui| {
-                let color = cursors::VOLT_COLOR;
+                let color = palette::volt_cursor();
                 let fmt_v = |v| fmt_sig(v, "V", READOUT_DIGITS, 0.0);
                 if self.y_axis == YAxis::Volts {
                     readout(ui, "V1", Some(fmt_v(c.v[0])), color);
@@ -954,7 +1021,7 @@ impl ScopeApp {
                 // reads them in its own volts.
                 ui.label(RichText::new("V1/V2").monospace().strong().color(color));
                 let maps = self.y_maps();
-                for (i, (name, ch_color)) in [("CH1", CH1_COLOR), ("CH2", CH2_COLOR)]
+                for (i, (name, ch_color)) in [("CH1", palette::ch1()), ("CH2", palette::ch2())]
                     .into_iter()
                     .enumerate()
                 {
@@ -973,6 +1040,143 @@ impl ScopeApp {
                     );
                 }
             });
+        }
+    }
+
+    /// Div mode: start, follow and end the drag of a ground marker.
+    fn handle_marker_drag(&mut self, ctx: &egui::Context, on_plot: bool) {
+        let (pos, pressed, down) = ctx.input(|i| {
+            (
+                i.pointer.latest_pos(),
+                i.pointer.primary_pressed(),
+                i.pointer.primary_down(),
+            )
+        });
+        if !down || self.y_axis != YAxis::Divisions {
+            self.marker_drag = None;
+            return;
+        }
+        let (Some(pos), Some(t)) = (pos, self.last_transform) else {
+            return;
+        };
+        if pressed && on_plot && self.marker_drag.is_none() && self.cursors.dragging.is_none() {
+            self.marker_drag = marker_at(&t, &self.y_maps(), pos);
+        }
+        let Some(i) = self.marker_drag else { return };
+        let Some(w) = &self.waveform else { return };
+        let Some(ch) = [&w.ch1, &w.ch2][i] else {
+            return;
+        };
+        let base = YMap::divisions(ch).offset;
+        let y = t.value_from_position(pos).y;
+        self.ground_shift[i] = y - base;
+    }
+
+    /// Keyboard shortcuts. Keys are taken unless a text field is typed in.
+    fn handle_keys(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        if ctx.text_edit_focused() {
+            return;
+        }
+        let key = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_key(m, k));
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::O)))
+        {
+            self.open_file_dialog(ctx);
+        }
+        if key(Modifiers::NONE, Key::F1) {
+            self.help_open = !self.help_open;
+        }
+        if key(Modifiers::NONE, Key::B) {
+            self.light_theme = !self.light_theme;
+            palette::set_light(self.light_theme);
+            ctx.set_theme(if self.light_theme {
+                egui::Theme::Light
+            } else {
+                egui::Theme::Dark
+            });
+        }
+        if self.waveform.is_none() {
+            return;
+        }
+        for (k, fit) in [
+            (Key::F, Fit::Both),
+            (Key::H, Fit::Horizontal),
+            (Key::V, Fit::Vertical),
+        ] {
+            if key(Modifiers::NONE, k) {
+                self.pending_fit = Some(fit);
+            }
+        }
+        if key(Modifiers::NONE, Key::Z) {
+            self.zoom_view = !self.zoom_view;
+        }
+        if key(Modifiers::NONE, Key::S) {
+            self.fft.show = !self.fft.show;
+        }
+        if key(Modifiers::NONE, Key::Y) {
+            self.set_y_axis(match self.y_axis {
+                YAxis::Volts => YAxis::Divisions,
+                YAxis::Divisions => YAxis::Volts,
+            });
+        }
+        if key(Modifiers::NONE, Key::C) {
+            self.cursors.set_mode(match self.cursors.mode {
+                CursorMode::Off => CursorMode::Time,
+                CursorMode::Time => CursorMode::Volt,
+                CursorMode::Volt => CursorMode::Both,
+                CursorMode::Both => CursorMode::Off,
+            });
+        }
+        for (i, k) in [Key::Num1, Key::Num2].into_iter().enumerate() {
+            if key(Modifiers::NONE, k) {
+                self.visible[i] = !self.visible[i];
+            }
+        }
+        // Tab presses taken by `raw_input_hook` (cursors on).
+        for _ in 0..std::mem::take(&mut self.tab_presses) {
+            self.cursors.select_next();
+        }
+        if self.cursors.selected.is_some() && key(Modifiers::NONE, Key::Escape) {
+            self.cursors.selected = None;
+        }
+        // + and −: zoom the time axis around the centre.
+        if key(Modifiers::NONE, Key::Plus) || key(Modifiers::NONE, Key::Equals) {
+            self.pending_view = Some(ViewCommand::ZoomCenter(1.0 / 1.5));
+        }
+        if key(Modifiers::NONE, Key::Minus) {
+            self.pending_view = Some(ViewCommand::ZoomCenter(1.5));
+        }
+        // Arrows: move the selected cursor (1 sample or 1/100 of the screen;
+        // Shift: 1/10 of the screen), or else move the view by 1/10.
+        let Some(t) = self.last_transform else { return };
+        let bounds = t.bounds();
+        let (width, height) = (bounds.width(), bounds.height());
+        let dt = self
+            .waveform
+            .as_ref()
+            .and_then(|w| w.ch1.as_ref().or(w.ch2.as_ref()))
+            .and_then(|c| c.sample_interval())
+            .unwrap_or(width / 1000.0);
+        for (k, sx, sy) in [
+            (Key::ArrowLeft, -1.0, 0.0),
+            (Key::ArrowRight, 1.0, 0.0),
+            (Key::ArrowUp, 0.0, 1.0),
+            (Key::ArrowDown, 0.0, -1.0),
+        ] {
+            for (m, big) in [(Modifiers::SHIFT, true), (Modifiers::NONE, false)] {
+                if !key(m, k) {
+                    continue;
+                }
+                let step_t = if big { width / 10.0 } else { dt };
+                let step_v = if big { height / 10.0 } else { height / 100.0 };
+                if !self.cursors.nudge(sx * step_t, sy * step_v) {
+                    let f = if big { 0.5 } else { 0.1 };
+                    self.pending_view = Some(ViewCommand::Pan {
+                        x: sx * f,
+                        y: sy * f,
+                    });
+                }
+            }
         }
     }
 
@@ -1012,7 +1216,7 @@ impl ScopeApp {
             .default_x_bounds(*full.start(), *full.end())
             .default_y_bounds(y0, y1)
             .show(ui, |plot| {
-                for (points, color) in reduced.into_iter().zip([CH1_COLOR, CH2_COLOR]) {
+                for (points, color) in reduced.into_iter().zip([palette::ch1(), palette::ch2()]) {
                     if !points.is_empty() {
                         plot.line(Line::new("", points).color(color).width(1.0));
                     }
@@ -1020,7 +1224,7 @@ impl ScopeApp {
                 // Darken what the main plot does not show.
                 let shade = |a: f64, b: f64| {
                     egui_plot::Polygon::new("", vec![[a, y0], [b, y0], [b, y1], [a, y1]])
-                        .fill_color(Color32::from_black_alpha(170))
+                        .fill_color(palette::overview_shade())
                         .stroke(egui::Stroke::NONE)
                 };
                 if v0 > *full.start() {
@@ -1030,11 +1234,11 @@ impl ScopeApp {
                     plot.polygon(shade(v1, *full.end()));
                 }
                 for x in [v0, v1] {
-                    plot.vline(VLine::new("", x).color(Color32::WHITE).width(1.5));
+                    plot.vline(VLine::new("", x).color(palette::overview_edge()).width(1.5));
                 }
                 plot.vline(
                     VLine::new("", 0.0)
-                        .color(TRIGGER_COLOR.gamma_multiply(0.5))
+                        .color(palette::trigger().gamma_multiply(0.5))
                         .style(LineStyle::Dotted { spacing: 4.0 }),
                 );
             });
@@ -1045,7 +1249,7 @@ impl ScopeApp {
             let x = response.transform.value_from_position(pos).x;
             self.pending_view = Some(ViewCommand::CenterX(x));
         }
-        if r.hovered() {
+        if r.hovered() && pointer_on_background(ui.ctx()) {
             let (delta, pos) = ui.input(|i| (wheel_delta(i), i.pointer.latest_pos()));
             let amount = delta.x + delta.y;
             if amount != 0.0
@@ -1088,7 +1292,7 @@ impl ScopeApp {
         ui.separator();
         ui.label("Source:");
         ui.horizontal(|ui| {
-            for (i, (name, color)) in [("CH1", CH1_COLOR), ("CH2", CH2_COLOR)]
+            for (i, (name, color)) in [("CH1", palette::ch1()), ("CH2", palette::ch2())]
                 .into_iter()
                 .enumerate()
             {
@@ -1122,7 +1326,7 @@ impl ScopeApp {
         ui.label(
             RichText::new("The FFT uses the samples shown in the time plot.")
                 .small()
-                .color(Color32::GRAY),
+                .color(palette::hint()),
         );
     }
 
@@ -1161,11 +1365,11 @@ impl ScopeApp {
         let Some((source, spectrum, count)) = self.current_spectrum() else {
             ui.label(
                 RichText::new("FFT: not enough samples in the time span shown")
-                    .color(Color32::GRAY),
+                    .color(palette::hint()),
             );
             return;
         };
-        let color = [CH1_COLOR, CH2_COLOR][source];
+        let color = [palette::ch1(), palette::ch2()][source];
         let db = self.fft.db;
         let level = move |v: f64| if db { fft::dbv(v) } else { v };
         let fmt_level = move |v: f64| {
@@ -1200,15 +1404,10 @@ impl ScopeApp {
                 );
             }
             if let Some(df) = spectrum.resolution() {
-                readout(
-                    ui,
-                    "Δf",
-                    Some(fmt_sig(df, "Hz", 3, 0.0)),
-                    Color32::LIGHT_GRAY,
-                )
-                .on_hover_text("Frequency step between the FFT bins");
+                readout(ui, "Δf", Some(fmt_sig(df, "Hz", 3, 0.0)), palette::fg_dim())
+                    .on_hover_text("Frequency step between the FFT bins");
             }
-            readout(ui, "N", Some(count.to_string()), Color32::LIGHT_GRAY)
+            readout(ui, "N", Some(count.to_string()), palette::fg_dim())
                 .on_hover_text("Samples used (the time span shown)");
         });
         let points: Vec<[f64; 2]> = spectrum
@@ -1226,7 +1425,7 @@ impl ScopeApp {
         });
         let mut plot = Plot::new(("fft", self.load_count, source, db))
             .show_grid(true)
-            .grid_color(GRID_COLOR)
+            .grid_color(palette::grid())
             .x_axis_label("Frequency")
             .x_axis_formatter(|mark, _| si(mark.value, "Hz"))
             .default_x_bounds(0.0, f_max)
@@ -1254,7 +1453,7 @@ impl ScopeApp {
             // Mouse wheel zooms, like the time plot.
             let (delta, modifiers) = plot.ctx().input(|i| (wheel_delta(i), i.modifiers));
             let amount = delta.x + delta.y;
-            if amount != 0.0 && plot.response().hovered() {
+            if amount != 0.0 && plot.response().hovered() && pointer_on_background(plot.ctx()) {
                 let f = (amount / WHEEL_ZOOM_POINTS).exp();
                 let factor = if modifiers.shift {
                     egui::vec2(f, 1.0)
@@ -1270,7 +1469,7 @@ impl ScopeApp {
                 plot.points(
                     egui_plot::Points::new("", vec![[pf, level(pv)]])
                         .radius(4.0)
-                        .color(Color32::WHITE),
+                        .color(palette::fg()),
                 );
             }
         });
@@ -1285,16 +1484,25 @@ impl ScopeApp {
                 "Drop a FNIRSI .wav file here (DPOX180H, 1013D, 1014D), or click \"Open file…\""
             };
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new(text).size(18.0).color(Color32::GRAY))
+                ui.label(RichText::new(text).size(18.0).color(palette::hint()))
             });
             return;
         }
 
         let fit = self.pending_fit.take();
         // Near a cursor line, a drag moves the cursor instead of the plot.
-        let allow_pan = self
-            .cursors
-            .handle_pointer(ui.ctx(), self.last_transform.as_ref());
+        let on_plot = pointer_on_background(ui.ctx());
+        // Div mode: a drag on a ground marker moves that channel up or down.
+        self.handle_marker_drag(ui.ctx(), on_plot);
+        let allow_pan = self.cursors.handle_pointer(
+            ui.ctx(),
+            if self.marker_drag.is_some() {
+                None
+            } else {
+                self.last_transform.as_ref()
+            },
+            on_plot,
+        ) && self.marker_drag.is_none();
         let maps = self.y_maps();
         let [data_1, data_2] = self.plot_data();
         if self.zoom_view {
@@ -1344,7 +1552,7 @@ impl ScopeApp {
         let response = plot
             .allow_drag(allow_pan)
             .show_grid(true)
-            .grid_color(GRID_COLOR)
+            .grid_color(palette::grid())
             // No legend: the OSD names the channels by colour, and a legend
             // covers the trace.
             .x_axis_label("Time (trigger at t = 0)")
@@ -1395,7 +1603,8 @@ impl ScopeApp {
                 let zone = pointer.and_then(|p| axis_zone(p, frame, outer));
                 // An axis label area pans that axis; inside the plot frame the wheel zooms.
                 // (The plot response also covers the axis areas, so test the zones first.)
-                if amount != 0.0 {
+                // Not through a window or menu on top of the plot (Help).
+                if amount != 0.0 && pointer_on_background(plot.ctx()) {
                     if let Some(axis) = zone {
                         // Pan by the wheel distance in screen points.
                         // Wheel up: earlier times (left) / higher voltages (up).
@@ -1434,6 +1643,18 @@ impl ScopeApp {
                         ViewCommand::ZoomX { factor, at } => {
                             plot.set_plot_bounds_x(at - (at - a) * factor..=at + (b - at) * factor);
                         }
+                        ViewCommand::ZoomCenter(factor) => {
+                            let (c, half) = ((a + b) / 2.0, (b - a) / 2.0 * factor);
+                            plot.set_plot_bounds_x(c - half..=c + half);
+                        }
+                        ViewCommand::Pan { x, y } => {
+                            let r_y = plot.plot_bounds().range_y();
+                            let height = r_y.end() - r_y.start();
+                            plot.translate_bounds(egui::vec2(
+                                (x * (b - a)) as f32,
+                                (y * height) as f32,
+                            ));
+                        }
                     }
                 }
                 if let Some(fit) = fit {
@@ -1459,21 +1680,28 @@ impl ScopeApp {
                 // entry and no hover label.
                 plot.vline(
                     VLine::new("", 0.0)
-                        .color(TRIGGER_COLOR.gamma_multiply(0.35))
+                        .color(palette::trigger().gamma_multiply(0.35))
                         .width(1.0)
                         .style(LineStyle::Dotted { spacing: 6.0 }),
                 );
                 if !data_1.is_empty() {
-                    plot.line(Line::new("CH1", data_1).color(CH1_COLOR).width(1.5));
+                    plot.line(Line::new("CH1", data_1).color(palette::ch1()).width(1.5));
                 }
                 if !data_2.is_empty() {
-                    plot.line(Line::new("CH2", data_2).color(CH2_COLOR).width(1.5));
+                    plot.line(Line::new("CH2", data_2).color(palette::ch2()).width(1.5));
                 }
             });
         self.cursors
             .update_pointer_icon(ui.ctx(), &response.transform);
         draw_trigger_marker(ui, &response.transform);
         draw_ground_markers(ui, &response.transform, &maps);
+        if self.y_axis == YAxis::Divisions && on_plot {
+            let pos = ui.ctx().input(|i| i.pointer.latest_pos());
+            let over = pos.and_then(|p| marker_at(&response.transform, &maps, p));
+            if self.marker_drag.is_some() || over.is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+            }
+        }
         // The measurements use the view of the last frame: draw once more
         // when the view changes, so that they are never one frame late.
         let old_x = self.last_transform.as_ref().map(|t| t.bounds().range_x());
@@ -1491,6 +1719,11 @@ impl ScopeApp {
 impl eframe::App for ScopeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        palette::set_light(self.light_theme);
+        // No shortcuts while the welcome screen is open.
+        if !self.splash_open {
+            self.handle_keys(&ctx);
+        }
         self.handle_dropped_files(&ctx);
         self.receive_loaded_files();
         // A file was dropped or opened: the splash screen is no longer needed.
@@ -1523,8 +1756,30 @@ impl eframe::App for ScopeApp {
             egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::central_panel(ui.style()).fill(Color32::BLACK))
+            .frame(egui::Frame::central_panel(ui.style()).fill(palette::panel_bg()))
             .show(ui, |ui| self.scope_screen(ui));
+    }
+
+    /// With cursors on, Tab selects the next cursor. Take the Tab key events
+    /// here, before egui uses them to move the focus between buttons.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.cursors.mode == CursorMode::Off || self.splash_open || self.waveform.is_none() {
+            return;
+        }
+        raw_input.events.retain(|e| match e {
+            egui::Event::Key {
+                key: egui::Key::Tab,
+                pressed,
+                modifiers,
+                ..
+            } if modifiers.is_none() => {
+                if *pressed {
+                    self.tab_presses += 1;
+                }
+                false
+            }
+            _ => true,
+        });
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -1533,6 +1788,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, HIDE_SPLASH_KEY, &self.hide_splash);
         eframe::set_value(storage, ZOOM_VIEW_KEY, &self.zoom_view);
         eframe::set_value(storage, FFT_KEY, &self.fft);
+        eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
     }
 }
 
@@ -1624,7 +1880,7 @@ fn readout(
     // scope channel that is off).
     let (value, color, stroke) = match value {
         Some(v) => (v, color, egui::Stroke::new(1.0, color)),
-        None => ("OFF".to_owned(), OFF_COLOR, egui::Stroke::NONE),
+        None => ("OFF".to_owned(), palette::off(), egui::Stroke::NONE),
     };
     // One widget (not a frame around a label), so that a wrapped row moves the
     // whole box to the next line.
@@ -1660,7 +1916,7 @@ fn draw_trigger_marker(ui: &egui::Ui, transform: &PlotTransform) {
             egui::Align2::CENTER_TOP,
             text,
             font,
-            TRIGGER_COLOR,
+            palette::trigger(),
         );
         return;
     }
@@ -1671,7 +1927,7 @@ fn draw_trigger_marker(ui: &egui::Ui, transform: &PlotTransform) {
             egui::pos2(x + w, top),
             egui::pos2(x, top + h),
         ],
-        TRIGGER_COLOR,
+        palette::trigger(),
         egui::Stroke::NONE,
     ));
     painter.text(
@@ -1695,7 +1951,7 @@ fn channel_button(
     let (shown_color, tip) = if shown {
         (color, "Click to hide this channel")
     } else {
-        (OFF_COLOR, "Click to show this channel")
+        (palette::off(), "Click to show this channel")
     };
     let label = RichText::new(format!("{name} {text}"))
         .monospace()
@@ -1715,7 +1971,7 @@ fn channel_button(
 fn help_text(ui: &mut egui::Ui) {
     let section = |ui: &mut egui::Ui, title: &str, lines: &[&str]| {
         ui.add_space(6.0);
-        ui.label(RichText::new(title).strong().color(Color32::WHITE));
+        ui.label(RichText::new(title).strong().color(palette::fg()));
         for line in lines {
             ui.label(format!("• {line}"));
         }
@@ -1723,13 +1979,13 @@ fn help_text(ui: &mut egui::Ui) {
     ui.label(
         RichText::new(format!("FNIRSI Viewer {VERSION} · commit {GIT_HASH}"))
             .small()
-            .color(Color32::GRAY),
+            .color(palette::hint()),
     );
     section(
         ui,
         "Open a file",
         &[
-            "Drop a .wav file on the window, or click 📂 Open file….",
+            "Drop a .wav file on the window, or click ⏏ Open file….",
             "Supported: DPOX180H, and 1013D/1014D with the original FNIRSI firmware. The model is found automatically and shown at the top left.",
             "The file is read on this device; nothing is uploaded.",
             "If a file cannot be opened, a red banner says why, and the file shown before stays.",
@@ -1743,7 +1999,7 @@ fn help_text(ui: &mut egui::Ui) {
             "Mouse wheel on the time or voltage axis: move along that axis.",
             "Drag: move. Double-click: back to the start view.",
             "Touch: pinch to zoom, drag to move, double-tap to reset.",
-            "🔍 Zoom: an overview of the whole record above the plot. The bright window is the part shown below. Click or drag in it to move there; wheel on it to zoom in time.",
+            "⊕ Zoom: an overview of the whole record above the plot. The bright window is the part shown below. Click or drag in it to move there; wheel on it to zoom in time.",
             "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both.",
         ],
     );
@@ -1753,7 +2009,7 @@ fn help_text(ui: &mut egui::Ui) {
         &[
             "Volts: one voltage axis for both channels.",
             "Div: like the scope screen, 8 divisions. Each channel uses its own V/div and starts from its ground marker.",
-            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel.",
+            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel. In Div mode, drag a marker to move that channel up or down; Y ▾ → Reset channel positions puts them back.",
             "The orange T on the top edge is the trigger (t = 0).",
         ],
     );
@@ -1787,7 +2043,7 @@ fn help_text(ui: &mut egui::Ui) {
     );
     section(
         ui,
-        "Measurements (📏 Measure menu)",
+        "Measurements (▤ Measure menu)",
         &[
             "Tick the measurements and channels to show. The choice is saved.",
             "Samples: Screen (the time span shown), Record (the whole file) or T1–T2 (between the time cursors).",
@@ -1800,7 +2056,14 @@ fn help_text(ui: &mut egui::Ui) {
     section(
         ui,
         "Keyboard",
-        &["Esc: close this window, the welcome screen or an error message."],
+        &[
+            "Ctrl/⌘+O: open a file. F1: this help. B: black or white screen.",
+            "F: fit both. H: fit time. V: fit vertical.",
+            "Z: zoom view. S: spectrum (FFT). Y: volts or divisions. 1, 2: hide or show CH1, CH2.",
+            "+ and −: zoom the time axis. Arrows: move the view (Shift: more).",
+            "C: cursor mode (off, time, volt, both). Tab: select the next cursor; then the arrows move it (1 sample or 1/100 of the screen; Shift: 1/10). Esc: unselect.",
+            "Esc: close this window, the welcome screen or an error message.",
+        ],
     );
 }
 
@@ -1828,6 +2091,15 @@ pub fn decimate(points: &[[f64; 2]], buckets: usize) -> Vec<[f64; 2]> {
         .collect()
 }
 
+/// True if the pointer is over the main area of the window (the plots), not
+/// over a window, menu or popup on top of it. Mouse-wheel and cursor
+/// actions use this, so that scrolling the Help window does not zoom the plot.
+fn pointer_on_background(ctx: &egui::Context) -> bool {
+    ctx.input(|i| i.pointer.latest_pos())
+        .and_then(|p| ctx.layer_id_at(p))
+        .is_some_and(|layer| layer.order == egui::Order::Background)
+}
+
 /// Name of a cursor mode, for the menu.
 fn cursor_mode_name(mode: CursorMode) -> &'static str {
     match mode {
@@ -1838,6 +2110,40 @@ fn cursor_mode_name(mode: CursorMode) -> &'static str {
     }
 }
 
+/// Where the ground markers are: (channel, y on screen, left edge x).
+/// A second marker at about the same level is put beside the first.
+fn marker_layout(transform: &PlotTransform, maps: &[Option<YMap>; 2]) -> Vec<(usize, f32, f32)> {
+    let frame = transform.frame();
+    let mut out: Vec<(usize, f32, f32)> = Vec::new();
+    for (i, map) in maps.iter().enumerate() {
+        let Some(map) = map else { continue };
+        let y = transform.position_from_point_y(map.to_plot(0.0));
+        let dx = if out.iter().any(|(_, u, _)| (u - y).abs() < 12.0) {
+            14.0
+        } else {
+            0.0
+        };
+        out.push((i, y, frame.left() + dx));
+    }
+    out
+}
+
+/// The ground marker under `pos`, if any (only markers on screen).
+fn marker_at(
+    transform: &PlotTransform,
+    maps: &[Option<YMap>; 2],
+    pos: egui::Pos2,
+) -> Option<usize> {
+    let frame = transform.frame();
+    marker_layout(transform, maps)
+        .into_iter()
+        .filter(|&(_, y, _)| y >= frame.top() && y <= frame.bottom())
+        .find(|&(_, y, left)| {
+            (pos.y - y).abs() <= 8.0 && pos.x >= left - 2.0 && pos.x <= left + 16.0
+        })
+        .map(|(i, _, _)| i)
+}
+
 /// Ground markers on the left edge of the plot, like on a scope screen: a
 /// triangle with the channel number at the 0 V level of each channel.
 /// Off screen, "1▲" or "1▼" at the top or bottom edge shows where it is.
@@ -1845,19 +2151,10 @@ fn draw_ground_markers(ui: &egui::Ui, transform: &PlotTransform, maps: &[Option<
     let frame = *transform.frame();
     let painter = ui.painter_at(frame.expand(1.0));
     let font = egui::FontId::monospace(10.0);
-    let mut used: Vec<f32> = Vec::new();
-    for (i, (map, color)) in maps.iter().zip([CH1_COLOR, CH2_COLOR]).enumerate() {
-        let Some(map) = map else { continue };
+    let colors = [palette::ch1(), palette::ch2()];
+    for (i, y, left) in marker_layout(transform, maps) {
+        let color = colors[i];
         let label = format!("{}", i + 1);
-        let y = transform.position_from_point_y(map.to_plot(0.0));
-        // Two markers at about the same level: put the second beside the first.
-        let dx = if used.iter().any(|u| (u - y).abs() < 12.0) {
-            14.0
-        } else {
-            0.0
-        };
-        used.push(y);
-        let left = frame.left() + dx;
         if y < frame.top() || y > frame.bottom() {
             let (text, pos, align) = if y < frame.top() {
                 (

@@ -17,11 +17,15 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 ## Use
 
 - Drop a `.wav` file on the window, or click **Open file…**.
-- The welcome screen lists all the controls. The **❓ Help** button has the main instructions.
+- **◐ White / ◐ Black**: white screen with darker colours, for printing.
+- Keyboard: Ctrl/⌘+O open, F1 help, F/H/V fit, Z zoom view, S FFT, Y volts/div,
+  C cursors, Tab + arrows move a cursor, 1/2 hide a channel, +/− zoom, arrows pan.
+- In Div mode, drag a ground marker (1▶, 2▶) to move that channel.
+- The welcome screen lists all the controls. The **❔ Help** button has the main instructions.
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Mouse wheel over a time or voltage axis: pan along that axis.
 - Drag: pan. Double-click: reset the view.
-- **🔍 Zoom**: overview of the whole record above the plot; the bright window
+- **⊕ Zoom**: overview of the whole record above the plot; the bright window
   is the part shown. Click or drag in it to move there, wheel on it to zoom.
 - **Y ▾** menu: **Volts / Div**. *Volts* (default): one voltage axis for both channels.
   *Div* is like the scope screen: 8 divisions, each channel drawn with its own
@@ -38,7 +42,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
   shown in the time plot (zoom in to analyse a part). Windows Rectangular,
   Hanning, Hamming, Blackman-Harris and Flat top; scale dBV or V RMS; peak
   readout (frequency interpolated between bins), Δf and N.
-- **📏 Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
+- **▤ Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
   Vmax, Vmin, Vtop, Vbase, Vamp, Mean, RMS, Rise, Fall, +Width, −Width, +Duty),
   the channels, and the samples to measure: **Screen** (the time span shown
   now), **Record** (the whole file) or **T1–T2** (between the time cursors).

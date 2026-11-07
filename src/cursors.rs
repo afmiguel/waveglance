@@ -7,14 +7,10 @@
 //! Drag a cursor line to move it. Near a line, the drag moves the cursor and
 //! the plot does not pan.
 
-use eframe::egui::{self, Color32, CursorIcon, Pos2};
+use eframe::egui::{self, CursorIcon, Pos2};
 use egui_plot::{HLine, LineStyle, PlotBounds, PlotTransform, PlotUi, VLine};
 use std::ops::RangeInclusive;
 
-/// Colour of the time cursors (vertical lines).
-pub const TIME_COLOR: Color32 = Color32::from_rgb(255, 110, 255);
-/// Colour of the voltage cursors (horizontal lines).
-pub const VOLT_COLOR: Color32 = Color32::from_rgb(120, 255, 120);
 /// Distance in screen points at which the pointer grabs a cursor line.
 pub const GRAB_DISTANCE: f32 = 6.0;
 
@@ -57,6 +53,8 @@ pub struct Cursors {
     pub v: [f64; 2],
     /// The cursor that the pointer is moving now.
     pub dragging: Option<CursorId>,
+    /// The cursor that the arrow keys move (selected with Tab or a click).
+    pub selected: Option<CursorId>,
     /// Time cursors must be placed in the visible area on the next frame.
     place_time: bool,
     /// Voltage cursors must be placed in the visible area on the next frame.
@@ -75,6 +73,7 @@ impl Default for Cursors {
             t: [0.0; 2],
             v: [0.0; 2],
             dragging: None,
+            selected: None,
             place_time: false,
             place_volt: false,
             time_set: false,
@@ -98,6 +97,46 @@ impl Cursors {
         self.place_volt |= mode.shows_volt() && !self.volt_set;
         self.mode = mode;
         self.dragging = None;
+        if self.selected.is_some_and(|id| !self.shows(id)) {
+            self.selected = None;
+        }
+    }
+
+    /// True if cursor `id` is shown in the current mode.
+    pub fn shows(&self, id: CursorId) -> bool {
+        match id {
+            CursorId::T1 | CursorId::T2 => self.mode.shows_time(),
+            CursorId::V1 | CursorId::V2 => self.mode.shows_volt(),
+        }
+    }
+
+    /// Select the next shown cursor (T1, T2, V1, V2, then none).
+    pub fn select_next(&mut self) {
+        let shown: Vec<CursorId> = [CursorId::T1, CursorId::T2, CursorId::V1, CursorId::V2]
+            .into_iter()
+            .filter(|&id| self.shows(id))
+            .collect();
+        self.selected = match self
+            .selected
+            .and_then(|s| shown.iter().position(|&id| id == s))
+        {
+            Some(i) => shown.get(i + 1).copied(),
+            None => shown.first().copied(),
+        };
+    }
+
+    /// Move the selected cursor: `dt` seconds for a time cursor, `dv` plot
+    /// units for a voltage cursor. Returns false if no cursor of that kind is
+    /// selected.
+    pub fn nudge(&mut self, dt: f64, dv: f64) -> bool {
+        match self.selected {
+            Some(CursorId::T1) if dt != 0.0 => self.t[0] += dt,
+            Some(CursorId::T2) if dt != 0.0 => self.t[1] += dt,
+            Some(CursorId::V1) if dv != 0.0 => self.v[0] += dv,
+            Some(CursorId::V2) if dv != 0.0 => self.v[1] += dv,
+            _ => return false,
+        }
+        true
     }
 
     /// Move the visible cursors to 1/4 and 3/4 of the visible area on the
@@ -166,12 +205,14 @@ impl Cursors {
     }
 
     /// Start and stop drags.
+    /// `on_plot`: the pointer is over the plot, not over a window on top.
     /// Call this before the plot is built. Returns `true` if the plot may pan
     /// (no cursor is being dragged).
     pub fn handle_pointer(
         &mut self,
         ctx: &egui::Context,
         last_transform: Option<&PlotTransform>,
+        on_plot: bool,
     ) -> bool {
         if self.mode == CursorMode::Off {
             self.dragging = None;
@@ -191,8 +232,12 @@ impl Cursors {
             (Some(pos), Some(t)) => self.hit(t, pos),
             _ => None,
         };
-        if pressed && self.dragging.is_none() {
+        // A click on a window or menu on top of the plot does not grab a cursor.
+        if pressed && on_plot && self.dragging.is_none() {
             self.dragging = near;
+            if near.is_some() {
+                self.selected = near;
+            }
         }
         self.dragging.is_none()
     }
@@ -232,12 +277,18 @@ impl Cursors {
     /// Draw the visible cursor lines.
     pub fn draw(&self, plot: &mut PlotUi<'_>) {
         let style = LineStyle::Dashed { length: 8.0 };
-        let width = |id| if self.dragging == Some(id) { 2.0 } else { 1.2 };
+        let width = |id| {
+            if self.dragging == Some(id) || self.selected == Some(id) {
+                2.2
+            } else {
+                1.2
+            }
+        };
         if self.mode.shows_time() {
             for (i, id) in [CursorId::T1, CursorId::T2].into_iter().enumerate() {
                 plot.vline(
                     VLine::new(format!("T{}", i + 1), self.t[i])
-                        .color(TIME_COLOR)
+                        .color(crate::palette::time_cursor())
                         .style(style)
                         .width(width(id)),
                 );
@@ -247,7 +298,7 @@ impl Cursors {
             for (i, id) in [CursorId::V1, CursorId::V2].into_iter().enumerate() {
                 plot.hline(
                     HLine::new(format!("V{}", i + 1), self.v[i])
-                        .color(VOLT_COLOR)
+                        .color(crate::palette::volt_cursor())
                         .style(style)
                         .width(width(id)),
                 );
@@ -295,6 +346,28 @@ pub fn value_at(points: &[[f64; 2]], t: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_and_nudge() {
+        let mut c = Cursors::default();
+        c.place_in(&(0.0..=4.0), &(0.0..=4.0));
+        c.set_mode(CursorMode::Both);
+        c.select_next();
+        assert_eq!(c.selected, Some(CursorId::T1));
+        assert!(c.nudge(0.5, 0.0));
+        assert_eq!(c.t[0], 1.5);
+        assert!(!c.nudge(0.0, 1.0), "a time cursor ignores up/down");
+        for _ in 0..2 {
+            c.select_next();
+        }
+        assert_eq!(c.selected, Some(CursorId::V1));
+        c.set_mode(CursorMode::Time);
+        assert_eq!(c.selected, None, "hidden cursors are not selected");
+        c.select_next();
+        c.select_next();
+        c.select_next();
+        assert_eq!(c.selected, None, "after the last: none");
+    }
 
     #[test]
     fn interpolation() {

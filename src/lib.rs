@@ -5,6 +5,7 @@ pub mod cursors;
 pub mod fft;
 pub mod fnirsi1013d;
 pub mod measure;
+pub mod palette;
 pub mod parser;
 
 pub use app::ScopeApp;

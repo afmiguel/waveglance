@@ -5,6 +5,22 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.5.0 — 2026-11-07
+
+- White screen (◐ White / ◐ Black, key B) for printing, with darker trace,
+  cursor and marker colours (all at least 3:1 contrast on white); saved.
+- Keyboard shortcuts: Ctrl/⌘+O open, F1 help, F/H/V fit, Z zoom view,
+  S FFT, Y volts/div, C cursor mode, 1/2 hide/show a channel, +/− zoom,
+  arrows move the view.
+- Cursors: Tab selects the next cursor (thicker line), the arrows move it by
+  one sample or 1/100 of the screen (Shift: 1/10). A click on a cursor
+  selects it too.
+- Div mode: drag the 1▶ / 2▶ ground marker to move a channel up or down;
+  Y ▾ → Reset channel positions.
+- Fix: scrolling the Help window (or a click on a menu) no longer zooms or
+  moves the plot under it.
+- Monochrome icons (⏏ Open file, ⊕ Zoom, ▤ Measure, ❔ Help), like the others.
+
 ## 0.4.0 — 2026-11-07
 
 - FFT (∿ FFT menu): the spectrum of CH1 or CH2 under the time plot, of the
