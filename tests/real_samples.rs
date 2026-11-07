@@ -166,3 +166,20 @@ fn all_sample_files_parse() {
     }
     assert_eq!(count, 23, "expected 23 sample files");
 }
+
+#[test]
+fn measurements_of_the_100khz_square() {
+    // Scope screen: F 99.98 kHz, Vpp 1.07 V. The signal has short glitches.
+    use fnirsi_viewer::measure::{Measurement, measure};
+    let w = load("100kHZ-1V.wav");
+    let ch1 = w.ch1.as_ref().unwrap();
+    for window in [-60e-6..=60e-6, -30e-6..=30e-6] {
+        let r = measure(&ch1.points, &window, 0.1 * ch1.volts_per_div);
+        let f = r.get(Measurement::Frequency).unwrap();
+        assert!((f - 99.98e3).abs() < 1e3, "{window:?}: f = {f}");
+        let duty = r.get(Measurement::DutyCycle).unwrap();
+        assert!((duty - 50.0).abs() < 5.0, "{window:?}: duty = {duty}");
+        let vamp = r.get(Measurement::Vamp).unwrap();
+        assert!((vamp - 0.94).abs() < 0.1, "{window:?}: Vamp = {vamp}");
+    }
+}

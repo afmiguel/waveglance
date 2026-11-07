@@ -17,6 +17,17 @@ the scope state: settings, a small screen thumbnail and the raw ADC samples.
 - **Cursors** (Off / Time / Volt / Both): drag a dashed cursor line to move it.
   Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
   (linear interpolation). Voltage cursors show V1, V2 and ΔV.
+- **📏 Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
+  Vmax, Vmin, Vtop, Vbase, Vamp, Mean, RMS, Rise, Fall, +Width, −Width, +Duty),
+  the channels, and the samples to measure: **Screen** (the time span shown
+  now), **Record** (the whole file) or **T1–T2** (between the time cursors).
+  The choice is saved between sessions.
+  - Vtop and Vbase are the most common high and low levels (histogram).
+  - Edges use the 10%, 50% and 90% levels between Vbase and Vtop, with
+    hysteresis. Glitches (two edges closer than 10% of the typical edge
+    spacing) are ignored.
+  - With an amplitude below 0.1 division, the signal is taken as noise and
+    the time measurements show "—".
 - The time axis has the trigger at t = 0. The voltage axis is in volts at the
   probe tip (the V/div that the scope shows already includes the probe setting).
 

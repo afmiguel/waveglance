@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod cursors;
+pub mod measure;
 pub mod parser;
 
 pub use app::ScopeApp;

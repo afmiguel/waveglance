@@ -1,6 +1,7 @@
 //! Oscilloscope-style user interface.
 
 use crate::cursors::{self, CursorMode, Cursors};
+use crate::measure::{self, Measurement, Unit};
 use crate::parser::{self, Acquisition, Waveform};
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{HoverPosition, Legend, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
@@ -17,6 +18,11 @@ const GRID_COLOR: Color32 = Color32::from_rgb(90, 90, 90);
 const WHEEL_LINE_POINTS: f32 = 50.0;
 /// Wheel distance (screen points) that zooms by a factor of e.
 const WHEEL_ZOOM_POINTS: f32 = 300.0;
+/// Storage key of the measurement settings.
+const MEASURE_KEY: &str = "measure";
+/// A channel whose amplitude is below this many divisions is noise: no
+/// edges, period or widths are measured.
+const MIN_AMPLITUDE_DIV: f64 = 0.1;
 
 /// A file read by the open dialog or by drag-and-drop: (name, bytes or error).
 type Loaded = (String, Result<Vec<u8>, String>);
@@ -55,6 +61,8 @@ pub struct ScopeApp {
     pending_fit: Option<Fit>,
     /// Measurement cursors.
     cursors: Cursors,
+    /// Selected automatic measurements.
+    measure: measure::Settings,
     /// Plot transform of the last frame, to find the cursor under the pointer
     /// before the plot is built.
     last_transform: Option<PlotTransform>,
@@ -70,6 +78,10 @@ impl ScopeApp {
         visuals.extreme_bg_color = SCREEN_BG; // egui_plot background
         cc.egui_ctx.set_visuals_of(egui::Theme::Dark, visuals);
 
+        let measure = cc
+            .storage
+            .and_then(|s| eframe::get_value(s, MEASURE_KEY))
+            .unwrap_or_default();
         let (inbox_tx, inbox_rx) = channel();
         Self {
             channel_1_data: Vec::new(),
@@ -83,6 +95,7 @@ impl ScopeApp {
             load_count: 0,
             pending_fit: None,
             cursors: Cursors::default(),
+            measure,
             last_transform: None,
             inbox_tx,
             inbox_rx,
@@ -197,7 +210,7 @@ impl ScopeApp {
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new("FNIRSI DPOX180H")
                     .strong()
@@ -209,9 +222,9 @@ impl ScopeApp {
             }
             let loaded = self.waveform.is_some();
             for (label, fit, tip) in [
-                ("↔ Fit H", Fit::Horizontal, "Show the full time span"),
+                ("⬌ Fit H", Fit::Horizontal, "Show the full time span"),
                 (
-                    "↕ Fit V",
+                    "⬍ Fit V",
                     Fit::Vertical,
                     "Fit the voltage axis to the samples between the first and last instant shown",
                 ),
@@ -243,6 +256,11 @@ impl ScopeApp {
             if mode != self.cursors.mode {
                 self.cursors.set_mode(mode);
             }
+            ui.separator();
+            // Always enabled: the choice can be made before a file is loaded.
+            ui.menu_button("📏 Measure", |ui| self.measure_menu(ui))
+                .response
+                .on_hover_text("Choose the automatic measurements to show");
             ui.separator();
             if let Some(name) = &self.file_name {
                 ui.label(RichText::new(name).monospace());
@@ -284,14 +302,132 @@ impl ScopeApp {
             for warning in &w.warnings {
                 ui.label(RichText::new(format!("⚠ {warning}")).color(Color32::from_rgb(255, 180, 0)));
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new("wheel: zoom (shift: time, alt: volts) · wheel on an axis: pan · drag: pan · double-click: reset")
-                        .small()
-                        .color(Color32::GRAY),
-                );
-            });
+            // A normal wrapped label: it goes to the next line on a narrow window
+            // instead of overlapping the readouts.
+            ui.label(
+                RichText::new("wheel: zoom (shift: time, alt: volts) · wheel on an axis: pan · drag: pan · double-click: reset")
+                    .small()
+                    .color(Color32::GRAY),
+            );
         });
+    }
+
+    /// Contents of the "Measure" menu.
+    fn measure_menu(&mut self, ui: &mut egui::Ui) {
+        let m = &mut self.measure;
+        ui.horizontal(|ui| {
+            ui.label("Channels:");
+            ui.checkbox(&mut m.channels[0], RichText::new("CH1").color(CH1_COLOR));
+            ui.checkbox(&mut m.channels[1], RichText::new("CH2").color(CH2_COLOR));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Samples:");
+            for w in measure::Window::ALL {
+                let tip = match w {
+                    measure::Window::Screen => "The time span shown now",
+                    measure::Window::Record => "All the samples in the file",
+                    measure::Window::Cursors => {
+                        "Between the time cursors (the screen if they are off)"
+                    }
+                };
+                ui.selectable_value(&mut m.window, w, w.label())
+                    .on_hover_text(tip);
+            }
+        });
+        ui.separator();
+        for item in Measurement::ALL {
+            let mut on = m.is_selected(item);
+            if ui
+                .checkbox(&mut on, item.label())
+                .on_hover_text(item.description())
+                .changed()
+            {
+                m.set_selected(item, on);
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("All").clicked() {
+                m.selected = Measurement::ALL.to_vec();
+            }
+            if ui.button("None").clicked() {
+                m.selected.clear();
+            }
+            if ui.button("Default").clicked() {
+                *m = measure::Settings::default();
+            }
+        });
+    }
+
+    /// The time window of the measurements, and its name for the readout.
+    fn measure_window(&self) -> Option<(RangeInclusive<f64>, &'static str)> {
+        let channels = [
+            self.channel_1_data.as_slice(),
+            self.channel_2_data.as_slice(),
+        ];
+        let record = time_span(&channels)?;
+        let screen = || {
+            self.last_transform.as_ref().map_or_else(
+                || (record.clone(), "record"),
+                |t| (t.bounds().range_x(), "screen"),
+            )
+        };
+        Some(match self.measure.window {
+            measure::Window::Record => (record.clone(), "record"),
+            measure::Window::Screen => screen(),
+            measure::Window::Cursors if self.cursors.mode.shows_time() => {
+                let [a, b] = self.cursors.t;
+                (a.min(b)..=a.max(b), "T1–T2")
+            }
+            measure::Window::Cursors => screen(),
+        })
+    }
+
+    /// Automatic measurement readouts, one row per channel.
+    fn measure_readout(&self, ui: &mut egui::Ui) {
+        let Some((window, window_name)) = self.measure_window() else {
+            return;
+        };
+        let Some(w) = &self.waveform else { return };
+        for (i, (name, ch, color)) in [("CH1", &w.ch1, CH1_COLOR), ("CH2", &w.ch2, CH2_COLOR)]
+            .into_iter()
+            .enumerate()
+        {
+            let Some(ch) = ch else { continue };
+            if !self.measure.channels[i] {
+                continue;
+            }
+            let r = measure::measure(&ch.points, &window, MIN_AMPLITUDE_DIV * ch.volts_per_div);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!("{name} ({window_name})"))
+                        .monospace()
+                        .strong()
+                        .color(color),
+                );
+                for m in self.measure.shown() {
+                    let value = r.get(m).map_or_else(
+                        || "—".to_owned(),
+                        |v| match m.unit() {
+                            Unit::Volt => si(v, "V"),
+                            Unit::Second => si(v, "s"),
+                            Unit::Hertz => si(v, "Hz"),
+                            Unit::Percent => format!("{v:.1} %"),
+                        },
+                    );
+                    readout(ui, m.label(), Some(value), color).on_hover_text(m.description());
+                }
+            });
+        }
+    }
+
+    /// Show the measurement panel?
+    fn shows_measurements(&self) -> bool {
+        let Some(w) = &self.waveform else {
+            return false;
+        };
+        let on = [w.ch1.is_some(), w.ch2.is_some()];
+        !self.measure.selected.is_empty() && (0..2).any(|i| on[i] && self.measure.channels[i])
     }
 
     /// Cursor readouts: positions, differences and channel values at T1/T2.
@@ -465,6 +601,12 @@ impl ScopeApp {
             });
         self.cursors
             .update_pointer_icon(ui.ctx(), &response.transform);
+        // The measurements use the view of the last frame: draw once more
+        // when the view changes, so that they are never one frame late.
+        let old_x = self.last_transform.as_ref().map(|t| t.bounds().range_x());
+        if old_x != Some(response.transform.bounds().range_x()) {
+            ui.ctx().request_repaint();
+        }
         self.last_transform = Some(response.transform);
     }
 }
@@ -477,12 +619,19 @@ impl eframe::App for ScopeApp {
 
         egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui));
         egui::Panel::bottom("osd").show(ui, |ui| self.osd(ui));
+        if self.shows_measurements() {
+            egui::Panel::bottom("measurements").show(ui, |ui| self.measure_readout(ui));
+        }
         if self.waveform.is_some() && self.cursors.mode != CursorMode::Off {
             egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
         }
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).fill(Color32::BLACK))
             .show(ui, |ui| self.scope_screen(ui));
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, MEASURE_KEY, &self.measure);
     }
 }
 
@@ -564,20 +713,26 @@ pub fn voltage_span_in(
 }
 
 /// One OSD readout: a coloured label and its value.
-fn readout(ui: &mut egui::Ui, label: &str, value: Option<String>, color: Color32) {
+fn readout(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: Option<String>,
+    color: Color32,
+) -> egui::Response {
     let value = value.unwrap_or_else(|| "OFF".to_owned());
-    egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, color))
-        .corner_radius(3)
-        .inner_margin(egui::Margin::symmetric(6, 2))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(format!("{label} {value}"))
-                    .monospace()
-                    .strong()
-                    .color(color),
-            );
-        });
+    // One widget (not a frame around a label), so that a wrapped row moves the
+    // whole box to the next line.
+    let text = RichText::new(format!("{label} {value}"))
+        .monospace()
+        .strong()
+        .color(color);
+    ui.add(
+        egui::Button::new(text)
+            .fill(Color32::TRANSPARENT)
+            .stroke(egui::Stroke::new(1.0, color))
+            .corner_radius(3)
+            .sense(egui::Sense::hover()),
+    )
 }
 
 /// Format a value with an SI prefix and unit, for example `0.2, "V"` → `200 mV`.
