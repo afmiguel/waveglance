@@ -211,6 +211,8 @@ pub struct Channel {
     pub ground_adc: f64,
     /// ADC codes per vertical division.
     pub counts_per_div: f64,
+    /// ADC code at the vertical centre of the screen.
+    pub center_code: f64,
     /// Highest ADC code. Codes 0 and `code_max` are at the limit of the
     /// input range (the signal is clipped).
     pub code_max: u16,
@@ -226,6 +228,12 @@ pub struct Channel {
 }
 
 impl Channel {
+    /// Position of 0 V on the screen, in divisions from the centre (up is
+    /// positive). This is where the scope draws the ground marker.
+    pub fn ground_div(&self) -> f64 {
+        (self.ground_adc - self.center_code) / self.counts_per_div
+    }
+
     /// Smallest voltage step: one ADC code, in volts.
     pub fn lsb_volts(&self) -> f64 {
         self.volts_per_div / self.counts_per_div
@@ -459,6 +467,7 @@ fn build_channel(
         probe_factor: 1.0,
         ground_adc,
         counts_per_div: ADC_COUNTS_PER_DIV,
+        center_code: ADC_CENTER,
         code_max: ADC_MAX,
         coupling: None,
         raw,

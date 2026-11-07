@@ -47,6 +47,8 @@ pub const COUNTS_PER_DIV: f64 = 50.0;
 pub const SAMPLES_PER_DIV: f64 = 50.0;
 /// Highest buffer code (8 divisions of 50 codes; 0 is the lowest).
 pub const CODE_MAX: u16 = 399;
+/// Code at the vertical centre of the screen (4 of the 8 divisions).
+pub const CENTER_CODE: f64 = 200.0;
 
 const VOLTS_PER_DIV: [f64; 7] = [5.0, 2.5, 1.0, 0.5, 0.2, 0.1, 0.05];
 const TIME_PER_DIV: [f64; 30] = [
@@ -112,6 +114,7 @@ pub fn parse(bytes: &[u8]) -> Result<Waveform, ParseError> {
             ground_adc: f64::from(zero),
             counts_per_div: COUNTS_PER_DIV,
             code_max: CODE_MAX,
+            center_code: CENTER_CODE,
             coupling: Some(coupling),
             raw,
             points: Vec::new(),

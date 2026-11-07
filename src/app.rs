@@ -29,6 +29,10 @@ const WHEEL_LINE_POINTS: f32 = 50.0;
 const WHEEL_ZOOM_POINTS: f32 = 300.0;
 /// Storage key of the measurement settings.
 const MEASURE_KEY: &str = "measure";
+/// Storage key of the vertical axis mode.
+const Y_AXIS_KEY: &str = "y_axis";
+/// Vertical divisions on the scope screen (±4 around the centre).
+const SCREEN_DIVS_Y: f64 = 8.0;
 /// A channel whose amplitude is below this many divisions is noise: no
 /// edges, period or widths are measured.
 const MIN_AMPLITUDE_DIV: f64 = 0.1;
@@ -46,6 +50,50 @@ pub enum Fit {
     Vertical,
     /// Horizontal fit, then vertical fit.
     Both,
+}
+
+/// Vertical axis of the plot.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum YAxis {
+    /// Divisions, like a scope screen: each channel uses its own V/div and
+    /// ground position, so a small signal is not flat next to a large one.
+    #[default]
+    Divisions,
+    /// Volts at the probe tip; both channels share the axis.
+    Volts,
+}
+
+/// Vertical mapping of one channel: plot y = volts × `scale` + `offset`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct YMap {
+    pub scale: f64,
+    pub offset: f64,
+}
+
+impl YMap {
+    pub const IDENTITY: Self = Self {
+        scale: 1.0,
+        offset: 0.0,
+    };
+
+    /// The mapping of a channel in Divisions mode: volts / (V/div), shifted
+    /// so that 0 V is at the ground position of the channel.
+    pub fn divisions(ch: &parser::Channel) -> Self {
+        Self {
+            scale: 1.0 / ch.volts_per_div,
+            offset: ch.ground_div(),
+        }
+    }
+
+    pub fn to_plot(self, volts: f64) -> f64 {
+        volts * self.scale + self.offset
+    }
+
+    pub fn to_volts(self, y: f64) -> f64 {
+        (y - self.offset) / self.scale
+    }
 }
 
 /// Application state.
@@ -72,6 +120,11 @@ pub struct ScopeApp {
     cursors: Cursors,
     /// Selected automatic measurements.
     measure: measure::Settings,
+    /// Vertical axis: divisions (per channel) or volts.
+    y_axis: YAxis,
+    /// CH1 and CH2 shown on the screen (a click on the OSD readout hides or
+    /// shows a channel, like the channel button of a scope).
+    visible: [bool; 2],
     /// Plot transform of the last frame, to find the cursor under the pointer
     /// before the plot is built.
     last_transform: Option<PlotTransform>,
@@ -91,6 +144,10 @@ impl ScopeApp {
             .storage
             .and_then(|s| eframe::get_value(s, MEASURE_KEY))
             .unwrap_or_default();
+        let y_axis = cc
+            .storage
+            .and_then(|s| eframe::get_value(s, Y_AXIS_KEY))
+            .unwrap_or_default();
         let (inbox_tx, inbox_rx) = channel();
         Self {
             channel_1_data: Vec::new(),
@@ -105,6 +162,8 @@ impl ScopeApp {
             pending_fit: None,
             cursors: Cursors::default(),
             measure,
+            y_axis,
+            visible: [true, true],
             last_transform: None,
             inbox_tx,
             inbox_rx,
@@ -127,14 +186,12 @@ impl ScopeApp {
                 self.error = None;
                 self.load_count += 1;
                 // New file: cursors at 1/4 and 3/4 of the waveform.
-                let channels = [
-                    self.channel_1_data.as_slice(),
-                    self.channel_2_data.as_slice(),
-                ];
+                let [d1, d2] = self.plot_data();
+                let channels = [d1.as_slice(), d2.as_slice()];
                 if let Some(time) = time_span(&channels)
-                    && let Some(volts) = voltage_span_in(&channels, &time)
+                    && let Some(span) = voltage_span_in(&channels, &time)
                 {
-                    self.cursors.place_in(&time, &volts);
+                    self.cursors.place_in(&time, &span);
                 }
                 self.last_transform = None;
             }
@@ -144,6 +201,61 @@ impl ScopeApp {
             }
         }
         self.file_name = Some(name);
+    }
+
+    /// Vertical mapping of each channel for the current Y axis mode
+    /// (`None` if the channel is off or hidden).
+    pub fn y_maps(&self) -> [Option<YMap>; 2] {
+        let Some(w) = &self.waveform else {
+            return [None, None];
+        };
+        let map = |ch: &Option<parser::Channel>, i: usize| {
+            ch.as_ref()
+                .filter(|_| self.visible[i])
+                .map(|c| match self.y_axis {
+                    YAxis::Divisions => YMap::divisions(c),
+                    YAxis::Volts => YMap::IDENTITY,
+                })
+        };
+        [map(&w.ch1, 0), map(&w.ch2, 1)]
+    }
+
+    /// The channel points in plot units: `[time_s, y]`.
+    fn plot_data(&self) -> [Vec<[f64; 2]>; 2] {
+        let maps = self.y_maps();
+        let data = [&self.channel_1_data, &self.channel_2_data];
+        std::array::from_fn(|i| match maps[i] {
+            Some(m) => data[i].iter().map(|p| [p[0], m.to_plot(p[1])]).collect(),
+            None => Vec::new(),
+        })
+    }
+
+    /// Change the Y axis mode. The voltage cursors keep their voltage (on the
+    /// first channel that is on). The view resets (the plot id changes).
+    fn set_y_axis(&mut self, y_axis: YAxis) {
+        let old = self.y_maps().into_iter().flatten().next();
+        self.y_axis = y_axis;
+        let new = self.y_maps().into_iter().flatten().next();
+        if let (Some(old), Some(new)) = (old, new) {
+            for v in &mut self.cursors.v {
+                *v = new.to_plot(old.to_volts(*v));
+            }
+        }
+        self.last_transform = None;
+    }
+
+    /// The Y axis selector: Div / Volts.
+    fn y_axis_buttons(&mut self, ui: &mut egui::Ui) {
+        let mut y_axis = self.y_axis;
+        ui.selectable_value(&mut y_axis, YAxis::Divisions, "Div").on_hover_text(
+            "Vertical axis in divisions, like the scope screen: each channel has its own V/div and ground marker",
+        );
+        ui.selectable_value(&mut y_axis, YAxis::Volts, "Volts")
+            .on_hover_text("Vertical axis in volts: both channels share the axis");
+        if y_axis != self.y_axis {
+            self.set_y_axis(y_axis);
+            ui.close();
+        }
     }
 
     /// A file could not be opened. The file shown before (if any) stays, and
@@ -264,18 +376,27 @@ impl ScopeApp {
             // Narrow window (phone): Fit and Cursors go into menus.
             let narrow = ui.ctx().content_rect().width() < NARROW_WIDTH;
             if narrow {
-                ui.add_enabled_ui(loaded, |ui| {
-                    ui.menu_button("Fit ▾", |ui| self.fit_buttons(ui));
+                ui.menu_button("View ▾", |ui| {
+                    ui.add_enabled_ui(loaded, |ui| self.fit_buttons(ui));
+                    ui.separator();
+                    ui.label("Y axis:");
+                    ui.horizontal(|ui| self.y_axis_buttons(ui));
                 });
                 ui.add_enabled_ui(loaded, |ui| {
                     ui.menu_button("Cursors ▾", |ui| self.cursor_mode_buttons(ui));
                 });
             } else {
                 ui.add_space(8.0);
-                ui.add_enabled_ui(loaded, |ui| self.fit_buttons(ui));
+                // `horizontal`: inside a wrapped row, a scope Ui is vertical.
+                ui.add_enabled_ui(loaded, |ui| ui.horizontal(|ui| self.fit_buttons(ui)));
+                ui.add_space(8.0);
+                ui.label("Y:");
+                self.y_axis_buttons(ui);
                 ui.add_space(8.0);
                 ui.label("Cursors:");
-                ui.add_enabled_ui(loaded, |ui| self.cursor_mode_buttons(ui));
+                ui.add_enabled_ui(loaded, |ui| {
+                    ui.horizontal(|ui| self.cursor_mode_buttons(ui))
+                });
             }
             ui.add_space(8.0);
             // Always enabled: the choice can be made before a file is loaded.
@@ -333,7 +454,7 @@ impl ScopeApp {
     }
 
     /// On-screen display: the digital readouts of the scope.
-    fn osd(&self, ui: &mut egui::Ui) {
+    fn osd(&mut self, ui: &mut egui::Ui) {
         // Probe factor and, if the file stores it, the input coupling.
         let probe = |ch: Option<&parser::Channel>| {
             ch.map_or(String::new(), |c| {
@@ -346,8 +467,23 @@ impl ScopeApp {
         let ch1_probe = probe(self.waveform.as_ref().and_then(|w| w.ch1.as_ref()));
         let ch2_probe = probe(self.waveform.as_ref().and_then(|w| w.ch2.as_ref()));
         ui.horizontal_wrapped(|ui| {
-            readout(ui, "CH1", self.ch1_v_div.map(|v| format!("{}/div{ch1_probe}", si(v, "V"))), CH1_COLOR);
-            readout(ui, "CH2", self.ch2_v_div.map(|v| format!("{}/div{ch2_probe}", si(v, "V"))), CH2_COLOR);
+            // Channel readouts are buttons: a click hides or shows the trace.
+            for (i, (name, vdiv, probe, color)) in [
+                ("CH1", self.ch1_v_div, &ch1_probe, CH1_COLOR),
+                ("CH2", self.ch2_v_div, &ch2_probe, CH2_COLOR),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let Some(vdiv) = vdiv else {
+                    readout(ui, name, None, color);
+                    continue;
+                };
+                let text = format!("{}/div{probe}", si(vdiv, "V"));
+                if channel_button(ui, name, &text, color, self.visible[i]).clicked() {
+                    self.visible[i] = !self.visible[i];
+                }
+            }
             readout(ui, "H", self.timebase.map(|t| format!("{}/div", si(t, "s"))), Color32::WHITE);
 
             let Some(w) = &self.waveform else { return };
@@ -489,7 +625,7 @@ impl ScopeApp {
             .enumerate()
         {
             let Some(ch) = ch else { continue };
-            if !self.measure.channels[i] {
+            if !self.measure.channels[i] || !self.visible[i] {
                 continue;
             }
             let r = measure::measure(&ch.points, &window, MIN_AMPLITUDE_DIV * ch.volts_per_div);
@@ -517,21 +653,15 @@ impl ScopeApp {
         }
     }
 
-    /// Measurements in a scroll area, so that they never fill a small screen.
-    fn measure_panel(&self, ui: &mut egui::Ui) {
-        let max = ui.ctx().content_rect().height() * 0.25;
-        egui::ScrollArea::vertical()
-            .max_height(max)
-            .auto_shrink([false, true])
-            .show(ui, |ui| self.measure_readout(ui));
-    }
-
     /// Show the measurement panel?
     fn shows_measurements(&self) -> bool {
         let Some(w) = &self.waveform else {
             return false;
         };
-        let on = [w.ch1.is_some(), w.ch2.is_some()];
+        let on = [
+            w.ch1.is_some() && self.visible[0],
+            w.ch2.is_some() && self.visible[1],
+        ];
         !self.measure.selected.is_empty() && (0..2).any(|i| on[i] && self.measure.channels[i])
     }
 
@@ -555,8 +685,14 @@ impl ScopeApp {
                     color,
                 );
                 let Some(w) = &self.waveform else { return };
-                for (name, ch, color) in [("CH1", &w.ch1, CH1_COLOR), ("CH2", &w.ch2, CH2_COLOR)] {
-                    let Some(ch) = ch else { continue };
+                for (i, (name, ch, color)) in
+                    [("CH1", &w.ch1, CH1_COLOR), ("CH2", &w.ch2, CH2_COLOR)]
+                        .into_iter()
+                        .enumerate()
+                {
+                    let Some(ch) = ch.as_ref().filter(|_| self.visible[i]) else {
+                        continue;
+                    };
                     let at = |t| cursors::value_at(&ch.points, t);
                     let lsb = ch.lsb_volts();
                     let fmt = |v: Option<f64>| {
@@ -573,9 +709,34 @@ impl ScopeApp {
             ui.horizontal_wrapped(|ui| {
                 let color = cursors::VOLT_COLOR;
                 let fmt_v = |v| fmt_sig(v, "V", READOUT_DIGITS, 0.0);
-                readout(ui, "V1", Some(fmt_v(c.v[0])), color);
-                readout(ui, "V2", Some(fmt_v(c.v[1])), color);
-                readout(ui, "ΔV", Some(fmt_v(c.delta_v())), color);
+                if self.y_axis == YAxis::Volts {
+                    readout(ui, "V1", Some(fmt_v(c.v[0])), color);
+                    readout(ui, "V2", Some(fmt_v(c.v[1])), color);
+                    readout(ui, "ΔV", Some(fmt_v(c.delta_v())), color);
+                    return;
+                }
+                // Divisions: the cursor lines are in divisions; each channel
+                // reads them in its own volts.
+                ui.label(RichText::new("V1/V2").monospace().strong().color(color));
+                let maps = self.y_maps();
+                for (i, (name, ch_color)) in [("CH1", CH1_COLOR), ("CH2", CH2_COLOR)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let Some(m) = maps[i] else { continue };
+                    let (a, b) = (m.to_volts(c.v[0]), m.to_volts(c.v[1]));
+                    readout(
+                        ui,
+                        name,
+                        Some(format!(
+                            "V1 {}  V2 {}  ΔV {}",
+                            fmt_v(a),
+                            fmt_v(b),
+                            fmt_v(b - a)
+                        )),
+                        ch_color,
+                    );
+                }
             });
         }
     }
@@ -601,31 +762,77 @@ impl ScopeApp {
             .handle_pointer(ui.ctx(), self.last_transform.as_ref());
         // The plot and its axis labels fill this area.
         let outer = ui.available_rect_before_wrap();
-        let response = Plot::new(("scope", self.load_count))
+        let maps = self.y_maps();
+        let [data_1, data_2] = self.plot_data();
+        let divisions = self.y_axis == YAxis::Divisions;
+        let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
+        plot = if divisions {
+            // Like a scope screen: 8 divisions, a line per division, and
+            // thinner lines at 1/5 division when zoomed in.
+            plot.default_y_bounds(-SCREEN_DIVS_Y / 2.0, SCREEN_DIVS_Y / 2.0)
+                .y_axis_label("Divisions")
+                .y_grid_spacer(egui_plot::uniform_grid_spacer(|input| {
+                    let s = input.base_step_size;
+                    if s <= 0.2 {
+                        [0.2, 1.0, 4.0]
+                    } else if s <= 1.0 {
+                        [1.0, 4.0, 20.0]
+                    } else {
+                        [5.0, 20.0, 100.0]
+                    }
+                }))
+                .y_axis_formatter(|mark, _| {
+                    let v = mark.value;
+                    if (v - v.round()).abs() < 1e-6 {
+                        format!("{}", v.round() as i64)
+                    } else {
+                        String::new()
+                    }
+                })
+        } else {
+            plot.y_axis_label("Voltage")
+                .y_axis_formatter(|mark, _| si(mark.value, "V"))
+        };
+        let response = plot
             .allow_drag(allow_pan)
             .show_grid(true)
             .grid_color(GRID_COLOR)
             // No legend: the OSD names the channels by colour, and a legend
             // covers the trace.
             .x_axis_label("Time (trigger at t = 0)")
-            .y_axis_label("Voltage")
             .x_axis_formatter(|mark, _| si(mark.value, "s"))
-            .y_axis_formatter(|mark, _| si(mark.value, "V"))
-            .label_formatter(|hover: &HoverPosition<'_>| {
-                let (name, p): (&str, &PlotPoint) = match hover {
+            .label_formatter(move |hover: &HoverPosition<'_>| {
+                let t = |p: &PlotPoint| format!("t = {}", si(p.x, "s"));
+                Some(match hover {
+                    // On a trace: the value of that channel, in its volts.
                     HoverPosition::NearDataPoint {
                         plot_name,
                         position,
                         ..
-                    } => (plot_name, position),
-                    HoverPosition::Elsewhere { position, .. } => ("", position),
-                };
-                let head = if name.is_empty() {
-                    String::new()
-                } else {
-                    format!("{name}\n")
-                };
-                Some(format!("{head}t = {}\nv = {}", si(p.x, "s"), si(p.y, "V")))
+                    } => {
+                        let map = match *plot_name {
+                            "CH1" => maps[0],
+                            "CH2" => maps[1],
+                            _ => None,
+                        };
+                        match map {
+                            Some(m) => format!(
+                                "{plot_name}\n{}\nv = {}",
+                                t(position),
+                                si(m.to_volts(position.y), "V")
+                            ),
+                            None => format!("{plot_name}\n{}", t(position)),
+                        }
+                    }
+                    // Elsewhere: the pointer position, not a signal value.
+                    HoverPosition::Elsewhere { position, .. } => {
+                        if divisions {
+                            format!("{}\n{:.2} div", t(position), position.y)
+                        } else {
+                            format!("{}\npointer {}", t(position), si(position.y, "V"))
+                        }
+                    }
+                })
             })
             // Mouse wheel over the plot zooms (like a scope knob); drag pans;
             // double-click resets. Shift + wheel zooms only the time axis,
@@ -669,10 +876,7 @@ impl ScopeApp {
                     });
                 }
                 if let Some(fit) = fit {
-                    let channels = [
-                        self.channel_1_data.as_slice(),
-                        self.channel_2_data.as_slice(),
-                    ];
+                    let channels = [data_1.as_slice(), data_2.as_slice()];
                     let mut time = plot.plot_bounds().range_x();
                     if matches!(fit, Fit::Horizontal | Fit::Both)
                         && let Some(full) = time_span(&channels)
@@ -698,24 +902,17 @@ impl ScopeApp {
                         .width(1.0)
                         .style(LineStyle::Dotted { spacing: 6.0 }),
                 );
-                if !self.channel_1_data.is_empty() {
-                    plot.line(
-                        Line::new("CH1", self.channel_1_data.clone())
-                            .color(CH1_COLOR)
-                            .width(1.5),
-                    );
+                if !data_1.is_empty() {
+                    plot.line(Line::new("CH1", data_1).color(CH1_COLOR).width(1.5));
                 }
-                if !self.channel_2_data.is_empty() {
-                    plot.line(
-                        Line::new("CH2", self.channel_2_data.clone())
-                            .color(CH2_COLOR)
-                            .width(1.5),
-                    );
+                if !data_2.is_empty() {
+                    plot.line(Line::new("CH2", data_2).color(CH2_COLOR).width(1.5));
                 }
             });
         self.cursors
             .update_pointer_icon(ui.ctx(), &response.transform);
         draw_trigger_marker(ui, &response.transform);
+        draw_ground_markers(ui, &response.transform, &maps);
         // The measurements use the view of the last frame: draw once more
         // when the view changes, so that they are never one frame late.
         let old_x = self.last_transform.as_ref().map(|t| t.bounds().range_x());
@@ -742,7 +939,12 @@ impl eframe::App for ScopeApp {
             egui::Panel::bottom("osd").show(ui, |ui| self.osd(ui));
         }
         if self.shows_measurements() {
-            egui::Panel::bottom("measurements").show(ui, |ui| self.measure_panel(ui));
+            // Not resizable, no scroll area: the panel follows its content.
+            // (A scroll area inside keeps the height of the last frame and
+            // hid the CH2 row.)
+            egui::Panel::bottom("measurements")
+                .resizable(false)
+                .show(ui, |ui| self.measure_readout(ui));
         }
         if self.waveform.is_some() && self.cursors.mode != CursorMode::Off {
             egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
@@ -754,6 +956,7 @@ impl eframe::App for ScopeApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, MEASURE_KEY, &self.measure);
+        eframe::set_value(storage, Y_AXIS_KEY, &self.y_axis);
     }
 }
 
@@ -904,6 +1107,92 @@ fn draw_trigger_marker(ui: &egui::Ui, transform: &PlotTransform) {
     );
 }
 
+/// The OSD readout of a channel that is on, as a button that hides or shows
+/// its trace. A hidden channel is grey with a dashed look ("hidden").
+fn channel_button(
+    ui: &mut egui::Ui,
+    name: &str,
+    text: &str,
+    color: Color32,
+    shown: bool,
+) -> egui::Response {
+    let (shown_color, suffix, tip) = if shown {
+        (color, "", "Click to hide this channel")
+    } else {
+        (OFF_COLOR, " (hidden)", "Click to show this channel")
+    };
+    let label = RichText::new(format!("{name} {text}{suffix}"))
+        .monospace()
+        .strong()
+        .color(shown_color);
+    ui.add(
+        egui::Button::new(label)
+            .fill(Color32::TRANSPARENT)
+            .stroke(egui::Stroke::new(1.0, shown_color))
+            .corner_radius(3),
+    )
+    .on_hover_text(tip)
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Ground markers on the left edge of the plot, like on a scope screen: a
+/// triangle with the channel number at the 0 V level of each channel.
+/// Off screen, "1▲" or "1▼" at the top or bottom edge shows where it is.
+fn draw_ground_markers(ui: &egui::Ui, transform: &PlotTransform, maps: &[Option<YMap>; 2]) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame.expand(1.0));
+    let font = egui::FontId::monospace(10.0);
+    let mut used: Vec<f32> = Vec::new();
+    for (i, (map, color)) in maps.iter().zip([CH1_COLOR, CH2_COLOR]).enumerate() {
+        let Some(map) = map else { continue };
+        let label = format!("{}", i + 1);
+        let y = transform.position_from_point_y(map.to_plot(0.0));
+        // Two markers at about the same level: put the second beside the first.
+        let dx = if used.iter().any(|u| (u - y).abs() < 12.0) {
+            14.0
+        } else {
+            0.0
+        };
+        used.push(y);
+        let left = frame.left() + dx;
+        if y < frame.top() || y > frame.bottom() {
+            let (text, pos, align) = if y < frame.top() {
+                (
+                    format!("{label}▲"),
+                    egui::pos2(left + 2.0, frame.top() + 2.0),
+                    egui::Align2::LEFT_TOP,
+                )
+            } else {
+                (
+                    format!("{label}▼"),
+                    egui::pos2(left + 2.0, frame.bottom() - 2.0),
+                    egui::Align2::LEFT_BOTTOM,
+                )
+            };
+            painter.text(pos, align, text, font.clone(), color);
+            continue;
+        }
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(left, y - 7.0),
+                egui::pos2(left + 9.0, y - 7.0),
+                egui::pos2(left + 14.0, y),
+                egui::pos2(left + 9.0, y + 7.0),
+                egui::pos2(left, y + 7.0),
+            ],
+            color,
+            egui::Stroke::NONE,
+        ));
+        painter.text(
+            egui::pos2(left + 5.0, y),
+            egui::Align2::CENTER_CENTER,
+            label,
+            font.clone(),
+            Color32::BLACK,
+        );
+    }
+}
+
 /// Text of one measurement of a channel, with fixed significant digits and
 /// no more resolution than the samples have.
 fn format_measurement(m: Measurement, value: Option<f64>, ch: &parser::Channel) -> String {
@@ -1003,7 +1292,7 @@ pub fn si_bare(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Axis, axis_zone, fmt_sig, si, time_span, voltage_span_in};
+    use super::{Axis, YMap, axis_zone, fmt_sig, si, time_span, voltage_span_in};
     use eframe::egui::{Rect, pos2};
 
     #[test]
@@ -1041,6 +1330,24 @@ mod tests {
         let flat = [[0.0, 0.5], [1.0, 0.5]];
         let r = voltage_span_in(&[&flat[..]], &(0.0..=1.0)).unwrap();
         assert!(r.start() < &0.5 && r.end() > &0.5);
+    }
+
+    #[test]
+    fn divisions_mapping() {
+        // 50 mV/div, ground 1.2 divisions below the centre.
+        let m = YMap {
+            scale: 1.0 / 0.05,
+            offset: -1.2,
+        };
+        assert!(
+            (m.to_plot(0.0) + 1.2).abs() < 1e-12,
+            "0 V is at the ground marker"
+        );
+        assert!(
+            (m.to_plot(0.1) - 0.8).abs() < 1e-12,
+            "100 mV is 2 divisions above it"
+        );
+        assert!((m.to_volts(m.to_plot(0.037)) - 0.037).abs() < 1e-12);
     }
 
     #[test]
