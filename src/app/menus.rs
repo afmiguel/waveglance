@@ -132,18 +132,19 @@ impl ScopeApp {
             self.open_file_dialog(ui.ctx());
         }
         ui.menu_button("Open example", |ui| {
-            for e in examples::EXAMPLES {
-                if ui.button(e.label).on_hover_text(e.about).clicked() {
-                    self.load_bytes(e.file.to_owned(), e.bytes);
-                    ui.close();
+            for (k, g) in examples::GROUPS.iter().enumerate() {
+                if k > 0 {
+                    ui.separator();
                 }
+                ui.label(RichText::new(g.name).strong());
+                for e in examples::EXAMPLES.iter().filter(|e| e.group == g.name) {
+                    if ui.button(e.label).on_hover_text(e.about).clicked() {
+                        self.load_bytes(e.file.to_owned(), e.bytes);
+                        ui.close();
+                    }
+                }
+                ui.label(RichText::new(g.credit).small().color(palette::hint()));
             }
-            ui.separator();
-            ui.label(
-                RichText::new(examples::CREDIT)
-                    .small()
-                    .color(palette::hint()),
-            );
         });
         ui.separator();
         if ui

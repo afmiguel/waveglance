@@ -5,6 +5,16 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.13.0 — 2026-11-07
+
+- **Rigol examples** in File → Open example: DHO1074 and MSO5000 `.bin`
+  files with four channels, and CSV files saved by a DS2072A and a DS1102E.
+  From the RigolWFM project (BSD 3-Clause); see
+  `assets/examples/rigol/README.md`. The menu groups the examples by source,
+  each with its credit.
+- `.bin` files with no channel label (Rigol MSO5000) show CH1…CH4 (before,
+  the names were empty).
+
 ## 0.12.0 — 2026-11-07
 
 - **Rigol `.bin`** files (MSO5000 "RG01", DHO800/DHO1000 "RG03"): read

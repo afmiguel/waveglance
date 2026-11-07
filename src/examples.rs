@@ -1,11 +1,17 @@
 //! Example files built into the app (File → Open example).
 //!
-//! FNIRSI 1013D captures by lexus2026HA, CC BY-NC 4.0: see
-//! `assets/examples/1013d/README.md`. There are no DPOX180H examples yet: the
-//! only public DPOX180H files have no license.
+//! - FNIRSI 1013D captures by lexus2026HA, CC BY-NC 4.0: see
+//!   `assets/examples/1013d/README.md`.
+//! - Rigol captures from the RigolWFM project by Scott Prahl, BSD 3-Clause:
+//!   see `assets/examples/rigol/README.md`.
+//!
+//! There are no DPOX180H examples yet: the only public DPOX180H files have
+//! no license.
 
 /// One built-in example file.
 pub struct Example {
+    /// Menu group: the name of a [`Group`].
+    pub group: &'static str,
     /// Menu label.
     pub label: &'static str,
     /// What the example shows (menu tooltip).
@@ -15,12 +21,28 @@ pub struct Example {
     pub bytes: &'static [u8],
 }
 
-/// Credit for the example files, shown in the menu.
-pub const CREDIT: &str = "FNIRSI 1013D captures by lexus2026HA \
-    (github.com/lexus2026HA/FNIRSI-2C53T-Decoder), license CC BY-NC 4.0";
+/// A group of examples from one source, with its credit (shown in the menu).
+pub struct Group {
+    pub name: &'static str,
+    pub credit: &'static str,
+}
+
+pub const GROUPS: &[Group] = &[
+    Group {
+        name: "FNIRSI 1013D",
+        credit: "Captures by lexus2026HA (github.com/lexus2026HA/FNIRSI-2C53T-Decoder), \
+                 license CC BY-NC 4.0",
+    },
+    Group {
+        name: "Rigol",
+        credit: "From RigolWFM, copyright (c) 2020-23 Scott Prahl \
+                 (github.com/scottprahl/RigolWFM), license BSD 3-Clause",
+    },
+];
 
 pub const EXAMPLES: &[Example] = &[
     Example {
+        group: "FNIRSI 1013D",
         label: "1 kHz square wave, CH1 and CH2",
         about: "1013D, 500 µs/div. CH1 1 V/div DC, about 3.2 Vpp. CH2 is on with no signal. \
                 Try the measurements and the FFT (odd harmonics).",
@@ -28,6 +50,7 @@ pub const EXAMPLES: &[Example] = &[
         bytes: include_bytes!("../assets/examples/1013d/1.wav"),
     },
     Example {
+        group: "FNIRSI 1013D",
         label: "1 kHz square wave, clipped",
         about: "1013D, 100 µs/div, CH1 0.5 V/div. The signal goes past the bottom of the \
                 screen: the voltage measurements are marked with \"?\".",
@@ -35,24 +58,28 @@ pub const EXAMPLES: &[Example] = &[
         bytes: include_bytes!("../assets/examples/1013d/2.wav"),
     },
     Example {
+        group: "FNIRSI 1013D",
         label: "Small AC signal, 50 mV/div",
         about: "1013D, 2 ms/div, AC coupling, about 36 mVpp: a low-level, noisy signal.",
         file: "example-1013d-small-ac.wav",
         bytes: include_bytes!("../assets/examples/1013d/3.wav"),
     },
     Example {
+        group: "FNIRSI 1013D",
         label: "1 MHz signal",
         about: "1013D, 500 ns/div, CH1 1 V/div AC, about 5 Vpp.",
         file: "example-1013d-1mhz.wav",
         bytes: include_bytes!("../assets/examples/1013d/8.wav"),
     },
     Example {
+        group: "FNIRSI 1013D",
         label: "10 MHz signal",
         about: "1013D, 100 ns/div, CH1 1 V/div AC: few samples per period.",
         file: "example-1013d-10mhz.wav",
         bytes: include_bytes!("../assets/examples/1013d/7.wav"),
     },
     Example {
+        group: "FNIRSI 1013D",
         label: "500 kHz on two channels",
         about: "1013D, 1 µs/div. CH1 1 V/div and CH2 2.5 V/div, both AC. \
                 Try Y: Div and the voltage cursors.",
@@ -60,10 +87,42 @@ pub const EXAMPLES: &[Example] = &[
         bytes: include_bytes!("../assets/examples/1013d/15.wav"),
     },
     Example {
+        group: "FNIRSI 1013D",
         label: "Slow signal, about 1 Hz",
         about: "1013D, 2 s/div: a 1 minute record.",
         file: "example-1013d-1hz-slow.wav",
         bytes: include_bytes!("../assets/examples/1013d/12.wav"),
+    },
+    Example {
+        group: "Rigol",
+        label: "DHO1074: four channels (.bin)",
+        about: "Rigol DHO1074 .bin file, 5 ms/div, four channels with different signals. \
+                Use the channel buttons to show one at a time.",
+        file: "example-rigol-dho1074.bin",
+        bytes: include_bytes!("../assets/examples/rigol/DHO1074.bin"),
+    },
+    Example {
+        group: "Rigol",
+        label: "MSO5000: 1 kHz on four channels (.bin)",
+        about: "Rigol MSO5000 .bin file, 500 µs/div. The 1 kHz calibration signal on \
+                four channels: CH1 and CH4 about 3.2 Vpp, CH2 and CH3 about 1 Vpp.",
+        file: "example-rigol-mso5000.bin",
+        bytes: include_bytes!("../assets/examples/rigol/MSO5000-A.bin"),
+    },
+    Example {
+        group: "Rigol",
+        label: "DS2072A: 1 kHz, two channels (CSV)",
+        about: "CSV file saved by a Rigol DS2072A: the 1 kHz calibration signal, \
+                about 0.32 Vpp, on CH1 and CH2.",
+        file: "example-rigol-ds2072a.csv",
+        bytes: include_bytes!("../assets/examples/rigol/DS2072A-1.csv"),
+    },
+    Example {
+        group: "Rigol",
+        label: "DS1102E: 4 kHz, two channels (CSV)",
+        about: "CSV file saved by a Rigol DS1102E: about 4.2 kHz and 6 Vpp on CH1 and CH2.",
+        file: "example-rigol-ds1102e.csv",
+        bytes: include_bytes!("../assets/examples/rigol/DS1102E-D.csv"),
     },
 ];
 
@@ -76,6 +135,7 @@ mod tests {
         for e in EXAMPLES {
             let w = crate::formats::open(e.bytes).unwrap_or_else(|err| panic!("{}: {err}", e.file));
             assert!(w.trace("CH1").is_some(), "{}", e.file);
+            assert!(GROUPS.iter().any(|g| g.name == e.group), "{}", e.file);
         }
     }
 }

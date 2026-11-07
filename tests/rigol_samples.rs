@@ -46,6 +46,8 @@ fn bin_files() {
         assert_eq!(w.source.vendor, "Rigol", "{name}");
         assert_eq!(w.source.model, model, "{name}");
         assert_eq!(w.traces.len(), channels, "{name}");
+        let labels: Vec<&str> = w.traces.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["CH1", "CH2", "CH3", "CH4"][..channels], "{name}");
         let t = w.time_per_div.unwrap();
         assert!((t - tdiv).abs() < tdiv * 1e-6, "{name}: {t}");
         // The trigger (t = 0) is at the centre of the record.

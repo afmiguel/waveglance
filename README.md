@@ -22,7 +22,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 ## Use
 
 - Drop a `.wav` file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
-- **File ▾ → Open example**: real FNIRSI 1013D captures built into the app.
+- **File ▾ → Open example**: real FNIRSI 1013D and Rigol captures built into the app.
 - **File ▾ → Open reference…**: a second file drawn faint behind the traces,
   to compare. The REF readout at the bottom hides or shows it.
 - **File ▾ → Export CSV…**, **Save screenshot (PNG)…**, **Print…** (Ctrl/⌘+P,
@@ -211,5 +211,12 @@ The files in `assets/examples/1013d/` are FNIRSI 1013D captures by
 lexus2026HA, from
 [lexus2026HA/FNIRSI-2C53T-Decoder](https://github.com/lexus2026HA/FNIRSI-2C53T-Decoder),
 licensed [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). They
-are not changed. There are no DPOX180H examples: the only public DPOX180H files
-have no license.
+are not changed.
+
+The files in `assets/examples/rigol/` are Rigol captures (DHO1074 and MSO5000
+`.bin`, DS2072A and DS1102E CSV) from
+[scottprahl/RigolWFM](https://github.com/scottprahl/RigolWFM), copyright (c)
+2020-23 Scott Prahl, licensed BSD 3-Clause (full text in
+`assets/examples/rigol/LICENSE.txt`). They are not changed.
+
+There are no DPOX180H examples: the only public DPOX180H files have no license.

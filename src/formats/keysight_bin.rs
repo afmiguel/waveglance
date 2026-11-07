@@ -243,10 +243,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
                 (lo.min(v), hi.max(v))
             });
         let span = if hi > lo { f64::from(hi - lo) } else { 1.0 };
-        // Analog channels are labelled "1".."4"; others keep their name.
-        let (id, name) = match label.parse::<u8>() {
+        // Analog channels are labelled "1".."4" (Keysight) or "CH1".."CH4";
+        // others keep their name. No label (Rigol MSO5000): by position.
+        let next = traces.len() as u8 + 1;
+        let number = label.strip_prefix("CH").unwrap_or(&label).parse::<u8>();
+        let (id, name) = match number {
             Ok(n) => (TraceId::Analog(n), format!("CH{n}")),
-            Err(_) => (TraceId::Analog(traces.len() as u8 + 1), label.clone()),
+            Err(_) if label.is_empty() => (TraceId::Analog(next), format!("CH{next}")),
+            Err(_) => (TraceId::Analog(next), label.clone()),
         };
         let mut trace = Trace::new(
             id,
