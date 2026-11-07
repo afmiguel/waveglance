@@ -2,3 +2,4 @@
 /dist
 /tests/data/
 /.idea/
+.DS_Store
