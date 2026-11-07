@@ -33,6 +33,12 @@ const GIT_HASH: &str = env!("GIT_HASH");
 const MEASURE_KEY: &str = "measure";
 /// Storage key of "do not show the splash screen at startup".
 const HIDE_SPLASH_KEY: &str = "hide_splash";
+/// Storage key of the zoom view (overview strip) switch.
+const ZOOM_VIEW_KEY: &str = "zoom_view";
+/// Height of the overview strip, in points.
+const OVERVIEW_HEIGHT: f32 = 90.0;
+/// Min/max pairs drawn in the overview (about one per pixel column).
+const OVERVIEW_BUCKETS: usize = 1000;
 /// Storage key of the vertical axis mode. ("y_axis" held the old default,
 /// Divisions, saved automatically; a new key starts everyone in Volts.)
 const Y_AXIS_KEY: &str = "y_axis_mode";
@@ -101,6 +107,16 @@ impl YMap {
     }
 }
 
+/// A change of the main view asked for by the overview strip, applied in
+/// the next frame of the main plot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ViewCommand {
+    /// Put this time at the centre; keep the width.
+    CenterX(f64),
+    /// Multiply the visible time span by `factor`, keeping time `at` fixed.
+    ZoomX { factor: f64, at: f64 },
+}
+
 /// Application state.
 pub struct ScopeApp {
     /// CH1 points `[time_s, volts]`.
@@ -133,6 +149,10 @@ pub struct ScopeApp {
     hide_splash: bool,
     /// The Help window is open.
     help_open: bool,
+    /// Zoom view: an overview of the whole record above the main plot.
+    zoom_view: bool,
+    /// View change from the overview strip, for the next frame.
+    pending_view: Option<ViewCommand>,
     /// CH1 and CH2 shown on the screen (a click on the OSD readout hides or
     /// shows a channel, like the channel button of a scope).
     visible: [bool; 2],
@@ -181,6 +201,11 @@ impl ScopeApp {
             splash_open: !hide_splash,
             hide_splash,
             help_open: false,
+            zoom_view: cc
+                .storage
+                .and_then(|s| eframe::get_value(s, ZOOM_VIEW_KEY))
+                .unwrap_or(false),
+            pending_view: None,
             visible: [true, true],
             last_transform: None,
             inbox_tx,
@@ -505,6 +530,19 @@ impl ScopeApp {
             ui.menu_button(y_label, |ui| self.y_axis_buttons(ui))
                 .response
                 .on_hover_text("Vertical axis: volts, or divisions like the scope screen");
+            ui.add_space(8.0);
+            ui.add_enabled_ui(loaded, |ui| {
+                if ui
+                    .selectable_label(self.zoom_view, "🔍 Zoom")
+                    .on_hover_text(
+                        "Zoom view: an overview of the whole record above the plot. \
+                         Click or drag in it to move, wheel to zoom.",
+                    )
+                    .clicked()
+                {
+                    self.zoom_view = !self.zoom_view;
+                }
+            });
             ui.add_space(8.0);
             // Cursor menu: the button shows the mode in use.
             ui.add_enabled_ui(loaded, |ui| {
@@ -880,6 +918,96 @@ impl ScopeApp {
         }
     }
 
+    /// The overview strip of the zoom view: the whole record, with the part
+    /// that the main plot shows as a bright window. Click or drag: move the
+    /// main view there. Wheel: zoom the main view in time.
+    fn overview(&mut self, ui: &mut egui::Ui, data: [&Vec<[f64; 2]>; 2]) {
+        let channels = [data[0].as_slice(), data[1].as_slice()];
+        let Some(full) = time_span(&channels) else {
+            return;
+        };
+        let span_y = voltage_span_in(&channels, &full).unwrap_or(-1.0..=1.0);
+        let visible = self
+            .last_transform
+            .as_ref()
+            .map_or_else(|| full.clone(), |t| t.bounds().range_x());
+        let (v0, v1) = (
+            visible.start().max(*full.start()),
+            visible.end().min(*full.end()),
+        );
+        let (y0, y1) = (*span_y.start(), *span_y.end());
+        let reduced = [
+            decimate(data[0], OVERVIEW_BUCKETS),
+            decimate(data[1], OVERVIEW_BUCKETS),
+        ];
+        let response = Plot::new(("overview", self.load_count, self.y_axis))
+            .height(OVERVIEW_HEIGHT)
+            .show_axes([false, false])
+            .show_grid(false)
+            .show_x(false)
+            .show_y(false)
+            .allow_drag(false)
+            .allow_zoom(false)
+            .allow_scroll(false)
+            .allow_boxed_zoom(false)
+            .allow_double_click_reset(false)
+            .default_x_bounds(*full.start(), *full.end())
+            .default_y_bounds(y0, y1)
+            .show(ui, |plot| {
+                for (points, color) in reduced.into_iter().zip([CH1_COLOR, CH2_COLOR]) {
+                    if !points.is_empty() {
+                        plot.line(Line::new("", points).color(color).width(1.0));
+                    }
+                }
+                // Darken what the main plot does not show.
+                let shade = |a: f64, b: f64| {
+                    egui_plot::Polygon::new("", vec![[a, y0], [b, y0], [b, y1], [a, y1]])
+                        .fill_color(Color32::from_black_alpha(170))
+                        .stroke(egui::Stroke::NONE)
+                };
+                if v0 > *full.start() {
+                    plot.polygon(shade(*full.start(), v0));
+                }
+                if v1 < *full.end() {
+                    plot.polygon(shade(v1, *full.end()));
+                }
+                for x in [v0, v1] {
+                    plot.vline(VLine::new("", x).color(Color32::WHITE).width(1.5));
+                }
+                plot.vline(
+                    VLine::new("", 0.0)
+                        .color(TRIGGER_COLOR.gamma_multiply(0.5))
+                        .style(LineStyle::Dotted { spacing: 4.0 }),
+                );
+            });
+        let r = &response.response;
+        if (r.clicked() || r.dragged())
+            && let Some(pos) = r.interact_pointer_pos()
+        {
+            let x = response.transform.value_from_position(pos).x;
+            self.pending_view = Some(ViewCommand::CenterX(x));
+        }
+        if r.hovered() {
+            let (delta, pos) = ui.input(|i| (wheel_delta(i), i.pointer.latest_pos()));
+            let amount = delta.x + delta.y;
+            if amount != 0.0
+                && let Some(pos) = pos
+            {
+                let at = response.transform.value_from_position(pos).x;
+                let factor = f64::from((-amount / WHEEL_ZOOM_POINTS).exp());
+                self.pending_view = Some(ViewCommand::ZoomX { factor, at });
+            }
+            ui.ctx().set_cursor_icon(if r.dragged() {
+                egui::CursorIcon::Grabbing
+            } else {
+                egui::CursorIcon::Grab
+            });
+        }
+        if self.pending_view.is_some() {
+            ui.ctx().request_repaint();
+        }
+    }
+
     fn scope_screen(&mut self, ui: &mut egui::Ui) {
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         if self.waveform.is_none() || hovering {
@@ -899,10 +1027,15 @@ impl ScopeApp {
         let allow_pan = self
             .cursors
             .handle_pointer(ui.ctx(), self.last_transform.as_ref());
-        // The plot and its axis labels fill this area.
-        let outer = ui.available_rect_before_wrap();
         let maps = self.y_maps();
         let [data_1, data_2] = self.plot_data();
+        if self.zoom_view {
+            self.overview(ui, [&data_1, &data_2]);
+            ui.add_space(4.0);
+        }
+        let view_command = self.pending_view.take();
+        // The plot and its axis labels fill this area.
+        let outer = ui.available_rect_before_wrap();
         let divisions = self.y_axis == YAxis::Divisions;
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
         plot = if divisions {
@@ -1014,6 +1147,19 @@ impl ScopeApp {
                         _ => egui::CursorIcon::ResizeVertical,
                     });
                 }
+                if let Some(command) = view_command {
+                    let r = plot.plot_bounds().range_x();
+                    let (a, b) = (*r.start(), *r.end());
+                    match command {
+                        ViewCommand::CenterX(c) => {
+                            let half = (b - a) / 2.0;
+                            plot.set_plot_bounds_x(c - half..=c + half);
+                        }
+                        ViewCommand::ZoomX { factor, at } => {
+                            plot.set_plot_bounds_x(at - (at - a) * factor..=at + (b - at) * factor);
+                        }
+                    }
+                }
                 if let Some(fit) = fit {
                     let channels = [data_1.as_slice(), data_2.as_slice()];
                     let mut time = plot.plot_bounds().range_x();
@@ -1105,6 +1251,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, MEASURE_KEY, &self.measure);
         eframe::set_value(storage, Y_AXIS_KEY, &self.y_axis);
         eframe::set_value(storage, HIDE_SPLASH_KEY, &self.hide_splash);
+        eframe::set_value(storage, ZOOM_VIEW_KEY, &self.zoom_view);
     }
 }
 
@@ -1315,6 +1462,7 @@ fn help_text(ui: &mut egui::Ui) {
             "Mouse wheel on the time or voltage axis: move along that axis.",
             "Drag: move. Double-click: back to the start view.",
             "Touch: pinch to zoom, drag to move, double-tap to reset.",
+            "🔍 Zoom: an overview of the whole record above the plot. The bright window is the part shown below. Click or drag in it to move there; wheel on it to zoom in time.",
             "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both.",
         ],
     );
@@ -1362,6 +1510,30 @@ fn help_text(ui: &mut egui::Ui) {
         "Keyboard",
         &["Esc: close this window, the welcome screen or an error message."],
     );
+}
+
+/// Reduce `points` to about `buckets` min/max pairs, in time order, so that a
+/// long record draws fast and its peaks stay visible (like a scope display).
+pub fn decimate(points: &[[f64; 2]], buckets: usize) -> Vec<[f64; 2]> {
+    if buckets == 0 || points.len() <= buckets * 2 {
+        return points.to_vec();
+    }
+    let size = points.len().div_ceil(buckets);
+    points
+        .chunks(size)
+        .flat_map(|chunk| {
+            let (mut lo, mut hi) = (chunk[0], chunk[0]);
+            for p in chunk {
+                if p[1] < lo[1] {
+                    lo = *p;
+                }
+                if p[1] > hi[1] {
+                    hi = *p;
+                }
+            }
+            if lo[0] <= hi[0] { [lo, hi] } else { [hi, lo] }
+        })
+        .collect()
 }
 
 /// Name of a cursor mode, for the menu.
@@ -1531,7 +1703,7 @@ pub fn si_bare(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Axis, YMap, axis_zone, fmt_sig, si, time_span, voltage_span_in};
+    use super::{Axis, YMap, axis_zone, decimate, fmt_sig, si, time_span, voltage_span_in};
     use eframe::egui::{Rect, pos2};
 
     #[test]
@@ -1569,6 +1741,18 @@ mod tests {
         let flat = [[0.0, 0.5], [1.0, 0.5]];
         let r = voltage_span_in(&[&flat[..]], &(0.0..=1.0)).unwrap();
         assert!(r.start() < &0.5 && r.end() > &0.5);
+    }
+
+    #[test]
+    fn decimation_keeps_peaks_and_order() {
+        let pts: Vec<[f64; 2]> = (0..10_000)
+            .map(|i| [i as f64, if i == 4321 { 9.0 } else { (i % 7) as f64 }])
+            .collect();
+        let d = decimate(&pts, 100);
+        assert!(d.len() <= 200, "{}", d.len());
+        assert!(d.contains(&[4321.0, 9.0]), "the spike stays");
+        assert!(d.windows(2).all(|w| w[0][0] <= w[1][0]), "time order");
+        assert_eq!(decimate(&pts[..50], 100).len(), 50, "short input unchanged");
     }
 
     #[test]

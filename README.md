@@ -21,6 +21,8 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Mouse wheel over a time or voltage axis: pan along that axis.
 - Drag: pan. Double-click: reset the view.
+- **🔍 Zoom**: overview of the whole record above the plot; the bright window
+  is the part shown. Click or drag in it to move there, wheel on it to zoom.
 - **Y ▾** menu: **Volts / Div**. *Volts* (default): one voltage axis for both channels.
   *Div* is like the scope screen: 8 divisions, each channel drawn with its own
   V/div from its ground marker (**1▶**, **2▶** on the left edge).

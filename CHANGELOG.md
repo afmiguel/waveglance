@@ -5,6 +5,14 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.3.0 — 2026-11-07
+
+- Zoom view (🔍 Zoom button): an overview of the whole record above the
+  plot, with the part shown below as a bright window. Click or drag in the
+  overview to move the view there; wheel on it to zoom in time. The overview
+  draws min/max pairs, so peaks stay visible in long records. The switch is
+  saved between sessions.
+
 ## 0.2.3 — 2026-11-07
 
 - Fit and Y are menu buttons with ▾, like Cursors and Measure (Y uses radio
