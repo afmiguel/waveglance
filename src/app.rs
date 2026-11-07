@@ -18,8 +18,6 @@ const OFF_COLOR: Color32 = Color32::from_rgb(110, 110, 110);
 /// Measurements that a clipped signal makes unreliable.
 const WARN_COLOR: Color32 = Color32::from_rgb(255, 150, 60);
 const ERROR_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
-/// Below this width (points), the top bar uses compact menus.
-const NARROW_WIDTH: f32 = 600.0;
 /// Significant digits of the measurement and cursor readouts.
 const READOUT_DIGITS: i32 = 4;
 /// Screen points for one wheel "line" (one notch of a mouse wheel on desktop).
@@ -264,12 +262,12 @@ impl ScopeApp {
         self.last_transform = None;
     }
 
-    /// The Y axis selector: Volts (default) / Div.
+    /// Contents of the Y menu: Volts (default) / Div, as radio buttons.
     fn y_axis_buttons(&mut self, ui: &mut egui::Ui) {
         let mut y_axis = self.y_axis;
-        ui.selectable_value(&mut y_axis, YAxis::Volts, "Volts")
+        ui.radio_value(&mut y_axis, YAxis::Volts, "Volts")
             .on_hover_text("Vertical axis in volts: both channels share the axis");
-        ui.selectable_value(&mut y_axis, YAxis::Divisions, "Div").on_hover_text(
+        ui.radio_value(&mut y_axis, YAxis::Divisions, "Div").on_hover_text(
             "Vertical axis in divisions, like the scope screen: each channel has its own V/div and ground marker",
         );
         if y_axis != self.y_axis {
@@ -491,23 +489,22 @@ impl ScopeApp {
                 self.open_file_dialog(ui.ctx());
             }
             let loaded = self.waveform.is_some();
-            // Narrow window (phone): Fit and Cursors go into menus.
-            let narrow = ui.ctx().content_rect().width() < NARROW_WIDTH;
-            if narrow {
-                ui.menu_button("View ▾", |ui| {
-                    ui.add_enabled_ui(loaded, |ui| self.fit_buttons(ui));
-                    ui.separator();
-                    ui.label("Y axis:");
-                    ui.horizontal(|ui| self.y_axis_buttons(ui));
-                });
-            } else {
-                ui.add_space(8.0);
-                // `horizontal`: inside a wrapped row, a scope Ui is vertical.
-                ui.add_enabled_ui(loaded, |ui| ui.horizontal(|ui| self.fit_buttons(ui)));
-                ui.add_space(8.0);
-                ui.label("Y:");
-                self.y_axis_buttons(ui);
-            }
+            // All the options are menu buttons with ▾, so the bar is the same
+            // on a wide and on a narrow (phone) screen.
+            ui.add_space(8.0);
+            ui.add_enabled_ui(loaded, |ui| {
+                ui.menu_button("⛶ Fit ▾", |ui| self.fit_buttons(ui))
+                    .response
+                    .on_hover_text("Fit the view to the waveform");
+            });
+            ui.add_space(8.0);
+            let y_label = match self.y_axis {
+                YAxis::Volts => "Y: Volts ▾",
+                YAxis::Divisions => "Y: Div ▾",
+            };
+            ui.menu_button(y_label, |ui| self.y_axis_buttons(ui))
+                .response
+                .on_hover_text("Vertical axis: volts, or divisions like the scope screen");
             ui.add_space(8.0);
             // Cursor menu: the button shows the mode in use.
             ui.add_enabled_ui(loaded, |ui| {

@@ -5,6 +5,11 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.2.3 — 2026-11-07
+
+- Fit and Y are menu buttons with ▾, like Cursors and Measure (Y uses radio
+  buttons). The top bar is the same on wide and narrow screens.
+
 ## 0.2.2 — 2026-11-07
 
 - The Measure button has the ▾ arrow, like the other menus.

@@ -21,12 +21,12 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Mouse wheel over a time or voltage axis: pan along that axis.
 - Drag: pan. Double-click: reset the view.
-- **Y: Volts / Div**. *Volts* (default): one voltage axis for both channels.
+- **Y ▾** menu: **Volts / Div**. *Volts* (default): one voltage axis for both channels.
   *Div* is like the scope screen: 8 divisions, each channel drawn with its own
   V/div from its ground marker (**1▶**, **2▶** on the left edge).
 - Click the **CH1** or **CH2** readout at the bottom to hide or show that
   channel (its trace, ground marker, measurements and cursor values).
-- **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
+- **⛶ Fit ▾** menu. **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
   the first and last instant shown. **Fit both**: Fit H, then Fit V.
 - **⌖ Cursors** menu (Off / Time / Volt / Both, and *Bring to view*): drag a
   dashed cursor line to move it.
