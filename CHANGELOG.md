@@ -5,6 +5,20 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.12.0 — 2026-11-07
+
+- **Rigol `.bin`** files (MSO5000 "RG01", DHO800/DHO1000 "RG03"): read
+  with the Keysight reader (same layout). The trigger is at t = 0. Tested
+  with real files: model, channels, time/div and the 1 kHz calibration
+  signal.
+- Old MSO5074 `.bin` files with damaged values (like 1e33) are refused with
+  a message instead of being drawn.
+- CSV: Rigol files saved by the scope (DS1000Z, DS2000…) now have the
+  right time axis. Start and Increment are in the units line under the
+  names; before, the sample number was used as the time.
+- `scripts/fetch-samples.sh` also downloads the Rigol test files.
+- Rigol `.wfm` files are not read yet.
+
 ## 0.11.1 — 2026-11-07
 
 - The Open file dialog lists .bin and .vcd files too (before, they were

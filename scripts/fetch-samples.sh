@@ -50,7 +50,19 @@ trap 'rm -rf "$TMP" "$TMP2" "$TMP3"' EXIT
 git -C "$TMP3" init -q
 git -C "$TMP3" remote add origin "$REPO3"
 git -C "$TMP3" fetch -q --depth 1 origin "$COMMIT3"
-git -C "$TMP3" checkout -q FETCH_HEAD -- tests/files/bin
+git -C "$TMP3" checkout -q FETCH_HEAD -- tests/files/bin tests/files/wfm
 mkdir -p "$DEST3"
 cp "$TMP3"/tests/files/bin/agilent_* "$DEST3/"
 echo "Copied $(find "$DEST3" -name '*.bin' | wc -l | tr -d ' ') files to $DEST3"
+
+# Rigol .bin and .wfm files, with the CSV files that the scopes exported for
+# some of them (same repository and commit).
+DEST4="$ROOT/tests/data/rigol"
+mkdir -p "$DEST4"
+cp "$TMP3"/tests/files/bin/MSO50* "$TMP3"/tests/files/bin/DHO* "$DEST4/"
+cp "$TMP3"/tests/files/wfm/DS1054Z-* "$TMP3"/tests/files/wfm/DS1074Z-* "$TMP3"/tests/files/wfm/DS1202Z-E.wfm \
+   "$TMP3"/tests/files/wfm/MSO1104.wfm "$TMP3"/tests/files/wfm/DZ1104Z-A.wfm \
+   "$TMP3"/tests/files/wfm/DS1000E-* "$TMP3"/tests/files/wfm/DS1052E.* "$TMP3"/tests/files/wfm/DS1102E-* \
+   "$TMP3"/tests/files/wfm/DS1102D-* "$TMP3"/tests/files/wfm/DS2072A-* "$TMP3"/tests/files/wfm/DS2000-* \
+   "$TMP3"/tests/files/wfm/DS2202.wfm "$DEST4/"
+echo "Copied $(find "$DEST4" -name '*.wfm' -o -name '*.bin' | wc -l | tr -d ' ') files to $DEST4"

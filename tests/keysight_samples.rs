@@ -20,7 +20,7 @@ fn load(name: &str) -> Capture {
     });
     assert_eq!(
         formats::detect(&bytes).first().map(|f| f.0.name()),
-        Some("Keysight / Agilent (.bin)"),
+        Some("Keysight / Agilent / Rigol (.bin)"),
         "{name}"
     );
     formats::open(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"))

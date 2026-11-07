@@ -1,5 +1,11 @@
 //! Reader for the binary waveform files (`.bin`) of Keysight and Agilent
-//! oscilloscopes (InfiniiVision 1000/2000/3000/4000 X, 6000 and others).
+//! oscilloscopes (InfiniiVision 1000/2000/3000/4000 X, 6000 and others), and
+//! of Rigol oscilloscopes (MSO5000, DHO800/DHO1000), which use the same
+//! layout with "RG" in place of "AG".
+//!
+//! Rigol "03" (DHO800/1000) has 64-bit sizes, like Keysight "03". Rigol
+//! stores the x origin as the pre-trigger time, positive (the first sample
+//! is at −x origin).
 //!
 //! The format is documented by Keysight (user manuals, "Binary Data (.bin)
 //! Format"). Little-endian:
@@ -25,15 +31,15 @@
 use super::{Confidence, Format, ReadError, nice_per_div};
 use crate::model::{Acquisition, Capture, Display, Samples, Source, Trace, TraceId, Unit};
 
-/// Keysight / Agilent `.bin`.
+/// Keysight / Agilent / Rigol `.bin`.
 pub struct KeysightBinFormat;
 
 impl Format for KeysightBinFormat {
     fn name(&self) -> &'static str {
-        "Keysight / Agilent (.bin)"
+        "Keysight / Agilent / Rigol (.bin)"
     }
 
-    /// "AG" and a known version; sure if the size field is the file size.
+    /// "AG" or "RG" and a known version; sure if the size field is the file size.
     fn probe(&self, bytes: &[u8]) -> Confidence {
         let Some(version) = version(bytes) else {
             return Confidence::No;
@@ -59,9 +65,10 @@ impl Format for KeysightBinFormat {
     }
 }
 
-/// The format version (1, 3 or 10) if the file starts with "AG" and a known version.
+/// The format version (1, 3 or 10) if the file starts with "AG" or "RG"
+/// and a known version.
 fn version(bytes: &[u8]) -> Option<u32> {
-    if bytes.get(..2)? != b"AG" {
+    if !matches!(bytes.get(..2)?, b"AG" | b"RG") {
         return None;
     }
     let v: u32 = std::str::from_utf8(bytes.get(2..4)?).ok()?.parse().ok()?;
@@ -127,9 +134,10 @@ impl Reader<'_> {
 /// # Errors
 /// A [`ReadError`] if the file is not a valid `.bin` file or has no analog waveform.
 pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
-    let version = version(bytes)
-        .ok_or_else(|| ReadError("not a Keysight .bin file (no \"AG\" header)".into()))?;
+    let version =
+        version(bytes).ok_or_else(|| ReadError("not a Keysight or Rigol .bin file".into()))?;
     let wide = version == 3;
+    let rigol = bytes.starts_with(b"RG");
     let mut r = Reader { bytes, at: 4 };
     if wide {
         r.u64()?;
@@ -210,6 +218,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
             }
         }
         let Some(values) = values else { continue };
+        // Some files of old MSO5000 firmware hold values like 1e33: not
+        // samples. Refuse them instead of drawing nonsense.
+        if values.iter().any(|v| !v.is_finite() || v.abs() > 1e6) {
+            warnings.push(format!(
+                "{label}: values out of range (damaged file?); not shown"
+            ));
+            continue;
+        }
         if waveform_type == 4 || waveform_type == 5 {
             continue;
         }
@@ -236,7 +252,8 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
             id,
             name,
             Samples::Uniform {
-                t0: x_origin,
+                // Rigol: the x origin is the pre-trigger time, positive.
+                t0: if rigol { -x_origin.abs() } else { x_origin },
                 dt: x_increment,
                 values,
             },
@@ -253,14 +270,19 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         traces.push(trace);
     }
     if traces.is_empty() {
-        return Err(ReadError(
-            "Keysight .bin: no analog waveform in the file".into(),
-        ));
+        return Err(ReadError(if warnings.is_empty() {
+            "Keysight .bin: no analog waveform in the file".into()
+        } else {
+            format!(
+                "Keysight .bin: no analog waveform shown ({})",
+                warnings.join("; ")
+            )
+        }));
     }
     let dt = traces[0].sample_interval().unwrap_or(0.0);
     Ok(Capture {
         source: Source {
-            vendor: "Keysight".into(),
+            vendor: if rigol { "Rigol" } else { "Keysight" }.into(),
             model,
             format: KeysightBinFormat.name().into(),
         },

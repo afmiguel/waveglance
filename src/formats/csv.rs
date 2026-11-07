@@ -288,20 +288,25 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         Vec::new()
     };
 
-    // Rigol style: "X,CH1,Start,Increment" with the values in the first data line.
-    let lower: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
-    let start_col = lower.iter().position(|n| n == "start");
-    let inc_col = lower.iter().position(|n| n == "increment");
-    let rigol = match (start_col, inc_col) {
-        (Some(s), Some(i)) => {
-            let first = &rows[first_data];
-            first
-                .get(s)
-                .and_then(|f| number(f, delimiter))
-                .zip(first.get(i).and_then(|f| number(f, delimiter)))
-        }
-        _ => None,
+    // Rigol style: "X,CH1,Start,Increment". The values are in the next line
+    // (the units line "Sequence,Volt,-3e-7,5e-10" of the scope) or in the
+    // first data line.
+    let col_of =
+        |r: &Vec<&str>, name: &str| r.iter().position(|f| f.trim().eq_ignore_ascii_case(name));
+    let name_row = rows[..first_data]
+        .iter()
+        .position(|r| col_of(r, "start").is_some() && col_of(r, "increment").is_some());
+    let (start_col, inc_col) = match name_row {
+        Some(h) => (col_of(&rows[h], "start"), col_of(&rows[h], "increment")),
+        None => (None, None),
     };
+    let pair = |r: &Vec<&str>| {
+        let (s, i) = (start_col?, inc_col?);
+        r.get(s)
+            .and_then(|f| number(f, delimiter))
+            .zip(r.get(i).and_then(|f| number(f, delimiter)))
+    };
+    let rigol = name_row.and_then(|h| rows[h + 1..=first_data].iter().find_map(pair));
     let value_columns: Vec<usize> = columns
         .iter()
         .copied()
@@ -466,6 +471,20 @@ mod tests {
         assert_eq!(labels, ["CH1", "CH2"]);
         assert_eq!(w.traces[1].points()[2], [0.0, 2.200000047683716]);
         assert_eq!(w.traces[0].sample_interval(), Some(0.5e-3));
+    }
+
+    #[test]
+    fn rigol_units_line() {
+        // As saved by a DS1054Z: Start and Increment in the units line.
+        let w = read_str(
+            "X,CH1,CH2,Start,Increment,\nSequence,Volt,Volt,-3.0e-07,5.0e-10\n0,1.0,2.0,\n1,1.5,2.5,\n2,2.0,3.0,\n",
+        );
+        assert_eq!(w.traces.len(), 2);
+        let p = w.traces[0].points();
+        assert!(
+            (p[0][0] + 3e-7).abs() < 1e-15 && (p[2][0] - (-3e-7 + 1e-9)).abs() < 1e-15,
+            "{p:?}"
+        );
     }
 
     #[test]
