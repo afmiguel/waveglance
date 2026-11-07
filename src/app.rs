@@ -258,9 +258,13 @@ impl ScopeApp {
             }
             ui.separator();
             // Always enabled: the choice can be made before a file is loaded.
-            ui.menu_button("📏 Measure", |ui| self.measure_menu(ui))
-                .response
-                .on_hover_text("Choose the automatic measurements to show");
+            // Stay open while items are ticked; close on a click outside the menu.
+            let config = egui::containers::menu::MenuConfig::new()
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+            let (button, _) = egui::containers::menu::MenuButton::new("📏 Measure")
+                .config(config)
+                .ui(ui, |ui| self.measure_menu(ui));
+            button.on_hover_text("Choose the automatic measurements to show");
             ui.separator();
             if let Some(name) = &self.file_name {
                 ui.label(RichText::new(name).monospace());
