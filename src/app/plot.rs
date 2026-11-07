@@ -42,6 +42,7 @@ impl ScopeApp {
     /// that the main plot shows as a bright window. Click or drag: move the
     /// main view there. Wheel: zoom the main view in time.
     pub(super) fn overview(&mut self, ui: &mut egui::Ui, data: &[Vec<[f64; 2]>]) {
+        let digital: Vec<bool> = self.traces().iter().map(Trace::is_digital).collect();
         let channels: Vec<&[[f64; 2]]> = data.iter().map(Vec::as_slice).collect();
         let Some(full) = time_span(&channels) else {
             return;
@@ -75,7 +76,12 @@ impl ScopeApp {
                 for (i, points) in reduced.into_iter().enumerate() {
                     let color = palette::channel(i);
                     if !points.is_empty() {
-                        plot.line(Line::new("", points).color(color).width(1.0));
+                        plot.line(
+                            Line::new("", points)
+                                .color(color)
+                                .width(1.0)
+                                .allow_band(!digital.get(i).copied().unwrap_or(false)),
+                        );
                     }
                 }
                 // Darken what the main plot does not show.
@@ -291,7 +297,7 @@ impl ScopeApp {
             let text = if hovering {
                 "Release to load the file"
             } else {
-                "Drop a waveform file here (FNIRSI .wav, or CSV from any oscilloscope), or use File ▾ → Open file…"
+                "Drop a waveform file here (FNIRSI .wav, Keysight .bin, VCD, or CSV), or use File ▾ → Open file…"
             };
             ui.centered_and_justified(|ui| {
                 ui.label(RichText::new(text).size(18.0).color(palette::hint()))
@@ -321,6 +327,7 @@ impl ScopeApp {
         let data = self.plot_data_in(view.as_ref(), max_points);
         let record_span = self.waveform.as_ref().and_then(Capture::time_span);
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
+        let digital: Vec<bool> = self.traces().iter().map(Trace::is_digital).collect();
         let reference_lines = self.reference_lines();
         let math = self.math_channel();
         let math_map = self.math_map(math.as_deref());
@@ -388,6 +395,8 @@ impl ScopeApp {
             .label_formatter({
                 let maps = maps.clone();
                 let labels = labels.clone();
+                let units: Vec<&'static str> =
+                    self.traces().iter().map(|t| t.unit.symbol()).collect();
                 move |hover: &HoverPosition<'_>| {
                     let t = |p: &PlotPoint| format!("t = {}", si(p.x, "s"));
                     Some(match hover {
@@ -397,19 +406,27 @@ impl ScopeApp {
                             position,
                             ..
                         } => {
-                            let map = if *plot_name == "MATH" {
-                                math_map
+                            let index = labels.iter().position(|l| l == plot_name);
+                            let (map, unit) = if *plot_name == "MATH" {
+                                (math_map, "V")
                             } else {
-                                labels
-                                    .iter()
-                                    .position(|l| l == plot_name)
-                                    .and_then(|i| maps[i])
+                                (index.and_then(|i| maps[i]), index.map_or("V", |i| units[i]))
                             };
                             match map {
+                                // Digital: the logic level.
+                                Some(m) if unit.is_empty() => format!(
+                                    "{plot_name}\n{}\n= {}",
+                                    t(position),
+                                    match m.to_volts(position.y) {
+                                        v if v < 0.25 => "0",
+                                        v if v > 0.75 => "1",
+                                        _ => "x / z",
+                                    }
+                                ),
                                 Some(m) => format!(
                                     "{plot_name}\n{}\nv = {}",
                                     t(position),
-                                    si(m.to_volts(position.y), "V")
+                                    si(m.to_volts(position.y), unit)
                                 ),
                                 None => format!("{plot_name}\n{}", t(position)),
                             }
@@ -532,10 +549,13 @@ impl ScopeApp {
                 }
                 for (i, (points, label)) in data.into_iter().zip(labels).enumerate() {
                     if !points.is_empty() {
+                        // Digital steps have two points at each edge time:
+                        // egui_plot would merge them into filled bands.
                         plot.line(
                             Line::new(label, points)
                                 .color(palette::channel(i))
-                                .width(1.5),
+                                .width(1.5)
+                                .allow_band(!digital[i]),
                         );
                     }
                 }
@@ -551,10 +571,12 @@ impl ScopeApp {
                 self.search.current,
             );
         }
-        draw_ground_markers(ui, &response.transform, &maps);
+        let marker_maps = self.marker_maps();
+        draw_ground_markers(ui, &response.transform, &marker_maps);
+        draw_lane_labels(ui, &response.transform, self.traces(), &maps);
         if on_plot {
             let pos = ui.ctx().input(|i| i.pointer.latest_pos());
-            let over = pos.and_then(|p| marker_at(&response.transform, &maps, p));
+            let over = pos.and_then(|p| marker_at(&response.transform, &marker_maps, p));
             if self.marker_drag.is_some() || over.is_some() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
             }
@@ -809,5 +831,29 @@ pub(super) fn draw_search_marks(
             7.0,
             palette::trigger(),
         ));
+    }
+}
+
+/// The name of each digital trace at the left of its lane, in its colour.
+pub(super) fn draw_lane_labels(
+    ui: &egui::Ui,
+    transform: &PlotTransform,
+    traces: &[Trace],
+    maps: &[Option<YMap>],
+) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame);
+    for (i, (t, map)) in traces.iter().zip(maps).enumerate() {
+        let Some(map) = map.filter(|_| t.is_digital()) else {
+            continue;
+        };
+        let y = transform.position_from_point_y(map.to_plot(1.0)) - 2.0;
+        painter.text(
+            egui::pos2(frame.left() + 4.0, y),
+            egui::Align2::LEFT_BOTTOM,
+            &t.label,
+            egui::FontId::monospace(10.0),
+            palette::channel(i),
+        );
     }
 }

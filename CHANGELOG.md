@@ -5,6 +5,23 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.11.0 — 2026-11-07
+
+- **Keysight / Agilent `.bin`** files (InfiniiVision and others, versions
+  AG01/AG03/AG10): up to 4 channels, current channels in amperes, model from
+  the file, time/div from the display range. Tested with real files: the
+  time/div of 4 files and the scope's own frequency and Vpp measurements
+  match; a 4-channel MSO-X 4154A file with 2 million points per channel.
+- **VCD** (logic analyzers, mixed-signal scopes, simulators): 1-bit signals
+  as digital traces (steps, in lanes under the analog traces, with their
+  names; `x`/`z` drawn half-way) and `real` variables as analog traces.
+  Buses (more than 1 bit) are not shown yet.
+- Digital traces: no V/div ("logic" in the OSD), tooltip shows 0/1, voltage
+  measurements are hidden; frequency, period, widths and duty work.
+- Readouts use the unit of the trace (A for current channels).
+- `scripts/fetch-samples.sh` also downloads the Keysight test files (from
+  RigolWFM, BSD-3-Clause).
+
 ## 0.10.0 — 2026-11-07
 
 - **CSV files from any oscilloscope** (and other delimited text): Keysight

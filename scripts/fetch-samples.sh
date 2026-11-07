@@ -38,3 +38,19 @@ git -C "$TMP2" checkout -q FETCH_HEAD -- samples/1013d
 mkdir -p "$DEST2"
 cp "$TMP2"/samples/1013d/* "$DEST2/"
 echo "Copied $(find "$DEST2" -name '*.wav' | wc -l | tr -d ' ') files to $DEST2"
+
+# Keysight/Agilent .bin files (with the scope settings as .txt and a
+# screenshot as .png) from github.com/scottprahl/RigolWFM (BSD-3-Clause).
+# Not committed either; the tests only need them locally.
+REPO3="https://github.com/scottprahl/RigolWFM.git"
+COMMIT3="9e6f993103f773f81df409fc65c2cc359d7bd249"   # pinned: tests expect these files
+DEST3="$ROOT/tests/data/keysight"
+TMP3="$(mktemp -d)"
+trap 'rm -rf "$TMP" "$TMP2" "$TMP3"' EXIT
+git -C "$TMP3" init -q
+git -C "$TMP3" remote add origin "$REPO3"
+git -C "$TMP3" fetch -q --depth 1 origin "$COMMIT3"
+git -C "$TMP3" checkout -q FETCH_HEAD -- tests/files/bin
+mkdir -p "$DEST3"
+cp "$TMP3"/tests/files/bin/agilent_* "$DEST3/"
+echo "Copied $(find "$DEST3" -name '*.bin' | wc -l | tr -d ' ') files to $DEST3"

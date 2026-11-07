@@ -1,12 +1,13 @@
 //! The readouts under the plot: OSD, measurements and cursor values.
 
 use super::*;
+use crate::model::Unit as TraceUnit;
 
 impl ScopeApp {
     /// On-screen display: the digital readouts of the scope.
     pub(super) fn osd(&mut self, ui: &mut egui::Ui) {
         // V/div, probe factor and, if the file stores it, the input coupling.
-        let channels: Vec<(String, f64, String)> = self
+        let channels: Vec<(String, f64, String, TraceUnit)> = self
             .traces()
             .iter()
             .map(|t| {
@@ -18,15 +19,27 @@ impl ScopeApp {
                     t.label.clone(),
                     t.display.per_div,
                     format!(" {}X{coupling}", t.display.probe),
+                    t.unit,
                 )
             })
             .collect();
         let time_per_div = self.waveform.as_ref().and_then(|w| w.time_per_div);
         ui.horizontal_wrapped(|ui| {
             // Channel readouts are buttons: a click hides or shows the trace.
-            for (i, (name, vdiv, probe)) in channels.iter().enumerate() {
+            for (i, (name, vdiv, probe, unit)) in channels.iter().enumerate() {
                 let (name, vdiv) = (name.as_str(), *vdiv);
                 let color = palette::channel(i);
+                // A digital trace: no V/div; a click hides or shows it.
+                if *unit == TraceUnit::Logic {
+                    if channel_button(ui, name, "logic", color, self.visible[i])
+                        .on_hover_text("Digital signal (0/1). Click to hide or show it.")
+                        .clicked()
+                    {
+                        self.visible[i] = !self.visible[i];
+                    }
+                    continue;
+                }
+                let unit = unit.symbol();
                 // In Div mode a V/div chosen with the wheel replaces the file
                 // value; a "*" marks it.
                 let shown = match (self.y_axis, self.vdiv_override[i]) {
@@ -34,11 +47,11 @@ impl ScopeApp {
                     _ => vdiv,
                 };
                 let star = if shown == vdiv { "" } else { "*" };
-                let text = format!("{}/div{star}{probe}", si(shown, "V"));
+                let text = format!("{}/div{star}{probe}", si(shown, unit));
                 let response = channel_button(ui, name, &text, color, self.visible[i]).on_hover_text(
                     format!(
-                        "Mouse wheel: V/div of {name} (1-2-5 steps; switches Y to Div). In the file: {}/div.",
-                        si(vdiv, "V")
+                        "Mouse wheel: {unit}/div of {name} (1-2-5 steps; switches Y to Div). In the file: {}/div.",
+                        si(vdiv, unit)
                     ),
                 );
                 if response.clicked() {
@@ -210,7 +223,12 @@ impl ScopeApp {
                         .strong()
                         .color(color),
                 );
-                for m in self.measure.shown() {
+                // Voltage measurements mean nothing on a digital signal.
+                for m in self
+                    .measure
+                    .shown()
+                    .filter(|m| !(ch.is_digital() && m.unit() == Unit::Volt))
+                {
                     let value = format_measurement(m, r.get(m), ch);
                     // A clipped signal hides its real peaks: voltage values
                     // are not reliable (the real Vpp is larger).
@@ -265,7 +283,9 @@ impl ScopeApp {
                     let at = |t| cursors::value_at(ch.points(), t);
                     let lsb = ch.lsb();
                     let fmt = |v: Option<f64>| {
-                        v.map_or("—".to_owned(), |v| fmt_sig(v, "V", READOUT_DIGITS, lsb))
+                        v.map_or("—".to_owned(), |v| {
+                            fmt_sig(v, ch.unit.symbol(), READOUT_DIGITS, lsb)
+                        })
                     };
                     let (a, b) = (at(c.t[0]), at(c.t[1]));
                     let delta = a.zip(b).map(|(a, b)| b - a);
@@ -417,7 +437,7 @@ pub(super) fn format_spread(m: Measurement, v: f64, ch: &Trace) -> String {
         Unit::Second => fmt_sig(v, "s", 3, dt / 10.0),
         Unit::Hertz => fmt_sig(v, "Hz", 3, 0.0),
         Unit::Percent => format!("{v:.2} %"),
-        Unit::Volt => fmt_sig(v, "V", 3, 0.0),
+        Unit::Volt => fmt_sig(v, ch.unit.symbol(), 3, 0.0),
     }
 }
 
@@ -437,7 +457,7 @@ pub(super) fn format_measurement(m: Measurement, value: Option<f64>, ch: &Trace)
             } else {
                 lsb
             };
-            fmt_sig(v, "V", READOUT_DIGITS, res)
+            fmt_sig(v, ch.unit.symbol(), READOUT_DIGITS, res)
         }
         // A rise or fall faster than 2 samples cannot be measured.
         Unit::Second

@@ -16,7 +16,7 @@
 //! The files of this viewer (File → Export CSV) also give back the V/div,
 //! probe and coupling of each channel, from their `#` lines.
 
-use super::{Confidence, Format, ReadError};
+use super::{Confidence, Format, ReadError, nice_per_div};
 use crate::model::{
     Acquisition, Capture, Coupling, Display, Samples, Source, Trace, TraceId, Unit,
 };
@@ -103,17 +103,6 @@ fn number(field: &str, delimiter: char) -> Option<f64> {
         field.parse().ok()
     };
     v.filter(|v: &f64| v.is_finite())
-}
-
-/// A nice V/div in the 1-2-5 sequence: about `span` / 6.
-fn nice_per_div(span: f64) -> f64 {
-    let target = (span / 6.0).max(1e-3);
-    let decade = 10f64.powf(target.log10().floor());
-    [1.0, 2.0, 5.0, 10.0]
-        .into_iter()
-        .map(|m| m * decade)
-        .find(|&v| v >= target * 0.999)
-        .unwrap_or(10.0 * decade)
 }
 
 /// Channel name from a header field: "CH1(V)" / "ch1_V" / "1" / "C2" → "CH1" / "CH2".

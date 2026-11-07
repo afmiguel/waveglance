@@ -358,6 +358,9 @@ pub struct ScopeApp {
     math_cache: RefCell<Option<(MathKey, Option<Rc<Trace>>)>>,
     /// Recent measurement results: (key, results).
     measure_cache: RefCell<Vec<(MeasureKey, Rc<measure::Results>)>>,
+    /// Value range of the analog traces of the file (for the digital lanes
+    /// in Volts mode).
+    analog_span: Option<(f64, f64)>,
     /// A file waiting for the user to choose its format.
     format_choice: Option<FormatChoice>,
     /// The last file that could not be read, for the "Open as…" button of
@@ -445,6 +448,7 @@ impl ScopeApp {
             vdiv_wheel: 0.0,
             tab_presses: 0,
             format_choice: None,
+            analog_span: None,
             math_cache: RefCell::new(None),
             measure_cache: RefCell::new(Vec::new()),
             failed_file: None,
@@ -519,6 +523,15 @@ impl ScopeApp {
                 for warning in &w.warnings {
                     log::warn!("{name}: {warning}");
                 }
+                self.analog_span = w
+                    .traces
+                    .iter()
+                    .filter(|t| !t.is_digital())
+                    .flat_map(|t| t.points().iter().map(|p| p[1]))
+                    .filter(|v| v.is_finite())
+                    .fold(None, |acc: Option<(f64, f64)>, v| {
+                        Some(acc.map_or((v, v), |(lo, hi)| (lo.min(v), hi.max(v))))
+                    });
                 self.waveform = Some(w);
                 self.error = None;
                 self.file_name = Some(name);
@@ -557,10 +570,36 @@ impl ScopeApp {
     /// Vertical mapping of each trace for the current Y axis mode
     /// (`None` if the trace is hidden). One entry per trace.
     pub fn y_maps(&self) -> Vec<Option<YMap>> {
-        self.traces()
+        // Digital traces: one lane each, under the analog traces (lane 0 at
+        // the bottom). Lane height: 1 division (Div), or 15% of the analog
+        // range (Volts).
+        let traces = self.traces();
+        let lanes = traces.iter().filter(|t| t.is_digital()).count();
+        let (lo, hi) = self.analog_span.unwrap_or((0.0, 0.0));
+        let volts_lane = if hi > lo { (hi - lo) * 0.15 } else { 1.0 };
+        let mut lane = 0usize;
+        traces
             .iter()
             .enumerate()
             .map(|(i, t)| {
+                if t.is_digital() {
+                    // Top lane first: the first digital trace is the highest.
+                    let k = (lanes - 1 - lane) as f64;
+                    lane += 1;
+                    if !self.visible.get(i).copied().unwrap_or(true) {
+                        return None;
+                    }
+                    return Some(match self.y_axis {
+                        YAxis::Divisions => YMap {
+                            scale: 0.7,
+                            offset: -SCREEN_DIVS_Y / 2.0 + 0.15 + k,
+                        },
+                        YAxis::Volts => YMap {
+                            scale: volts_lane * 0.7,
+                            offset: lo - (k + 1.2) * volts_lane,
+                        },
+                    });
+                }
                 if !self.visible.get(i).copied().unwrap_or(true) {
                     return None;
                 }
@@ -578,6 +617,16 @@ impl ScopeApp {
                     YAxis::Volts => YMap::IDENTITY,
                 })
             })
+            .collect()
+    }
+
+    /// Mappings for the ground markers: analog traces only (a digital trace
+    /// has a lane, not a ground marker).
+    fn marker_maps(&self) -> Vec<Option<YMap>> {
+        self.y_maps()
+            .into_iter()
+            .zip(self.traces())
+            .map(|(m, t)| m.filter(|_| !t.is_digital()))
             .collect()
     }
 

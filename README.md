@@ -10,6 +10,8 @@ not certain, a window asks):
 |-------|------|-------|
 | DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes |
 | 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
+| Keysight / Agilent | `.bin` (AG01, AG03, AG10) | Up to 4 channels; volts or amperes; no V/div in the file (a V/div that fits is used) |
+| VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, `real` variables as analog traces; buses not shown yet |
 | CSV / text, any oscilloscope | `.csv`, `.txt`: time + channel columns | Keysight, Rigol, Tektronix, Siglent layouts and this viewer's export; `,` `;` tab separators |
 
 These `.wav` files are **not** audio files. Each model has its own binary
@@ -126,7 +128,9 @@ Unit tests use synthetic files. The integration tests in `tests/real_samples.rs`
 use real files: DPOX180H files from
 [Rav263/fnirsi-wave-decoder](https://github.com/Rav263/fnirsi-wave-decoder)
 (no license) and 1013D files from lexus2026HA/FNIRSI-2C53T-Decoder
-(CC BY-NC 4.0). The files are not stored here. Download them
+(CC BY-NC 4.0), and Keysight/Agilent `.bin` files from
+[scottprahl/RigolWFM](https://github.com/scottprahl/RigolWFM) (BSD-3-Clause).
+The files are not stored here. Download them
 first:
 
 ```bash

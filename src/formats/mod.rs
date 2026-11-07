@@ -8,6 +8,8 @@
 pub mod csv;
 pub mod fnirsi_1013d;
 pub mod fnirsi_dpox;
+pub mod keysight_bin;
+pub mod vcd;
 
 use crate::model::{Capture, Display, Samples, Trace, TraceId};
 
@@ -54,6 +56,8 @@ impl std::error::Error for ReadError {}
 pub static FORMATS: &[&dyn Format] = &[
     &fnirsi_dpox::DpoxFormat,
     &fnirsi_1013d::Fnirsi1013dFormat,
+    &keysight_bin::KeysightBinFormat,
+    &vcd::VcdFormat,
     &csv::CsvFormat,
 ];
 
@@ -114,6 +118,18 @@ pub fn open(bytes: &[u8]) -> Result<Capture, ReadError> {
             names.join(", ")
         ))
     }))
+}
+
+/// A nice V/div in the 1-2-5 sequence, for formats that do not store it:
+/// about `span` / 6, so the signal fills 6 of the 8 divisions.
+pub(crate) fn nice_per_div(span: f64) -> f64 {
+    let target = (span / 6.0).max(1e-3);
+    let decade = 10f64.powf(target.log10().floor());
+    [1.0, 2.0, 5.0, 10.0]
+        .into_iter()
+        .map(|m| m * decade)
+        .find(|&v| v >= target * 0.999)
+        .unwrap_or(10.0 * decade)
 }
 
 /// How ADC codes become volts, for formats that store codes.

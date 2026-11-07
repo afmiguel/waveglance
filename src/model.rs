@@ -76,6 +76,8 @@ pub enum TraceId {
     Analog(u8),
     /// A math trace computed from other traces.
     Math,
+    /// A digital (logic) signal, 0 or 1: for example from a VCD file.
+    Digital(u16),
 }
 
 /// Physical unit of a trace.
@@ -84,6 +86,8 @@ pub enum Unit {
     #[default]
     Volt,
     Ampere,
+    /// Logic level: 0 or 1 (0.5 for an unknown or high-impedance value).
+    Logic,
 }
 
 impl Unit {
@@ -91,6 +95,7 @@ impl Unit {
         match self {
             Self::Volt => "V",
             Self::Ampere => "A",
+            Self::Logic => "",
         }
     }
 }
@@ -177,6 +182,11 @@ impl Trace {
             range: None,
             points: OnceCell::new(),
         }
+    }
+
+    /// A digital (logic) trace: values 0 and 1, drawn as steps in a lane.
+    pub fn is_digital(&self) -> bool {
+        matches!(self.id, TraceId::Digital(_))
     }
 
     /// The samples as `[time_s, value]` pairs (made once, then kept).

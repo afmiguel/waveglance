@@ -153,7 +153,7 @@ impl ScopeApp {
             return;
         };
         if pressed && on_plot && self.marker_drag.is_none() && self.cursors.dragging.is_none() {
-            self.marker_drag = marker_at(&t, &self.y_maps(), pos);
+            self.marker_drag = marker_at(&t, &self.marker_maps(), pos);
             // Volts mode: both channels share one axis, so a channel cannot
             // move alone. A drag on a marker switches to Div, where it can.
             if self.marker_drag.is_some() && self.y_axis == YAxis::Volts {

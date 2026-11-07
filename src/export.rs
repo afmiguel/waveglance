@@ -46,7 +46,14 @@ pub fn csv(w: &Capture, file_name: &str, app_version: &str) -> String {
     }
     out.push_str("time_s");
     for t in &w.traces {
-        let _ = write!(out, ",{}_{}", t.label.to_lowercase(), t.unit.symbol());
+        match t.unit.symbol() {
+            "" => {
+                let _ = write!(out, ",{}", t.label.to_lowercase());
+            }
+            unit => {
+                let _ = write!(out, ",{}_{unit}", t.label.to_lowercase());
+            }
+        }
     }
     out.push('\n');
     let points: Vec<&[[f64; 2]]> = w.traces.iter().map(|t| t.points()).collect();
