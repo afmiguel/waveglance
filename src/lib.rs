@@ -5,10 +5,10 @@ pub mod cursors;
 pub mod examples;
 pub mod export;
 pub mod fft;
-pub mod fnirsi1013d;
+pub mod formats;
 pub mod measure;
+pub mod model;
 pub mod palette;
-pub mod parser;
 
 pub use app::ScopeApp;
 

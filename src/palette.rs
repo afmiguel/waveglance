@@ -39,6 +39,17 @@ pub fn ch2() -> Color32 {
     pick(rgb(0, 230, 255), rgb(0, 115, 165))
 }
 
+/// Colour of channel `index` (0 = CH1): yellow, cyan, blue, red, then again.
+/// CH3 and CH4 avoid the magenta and green of the cursors and the pink of Math.
+pub fn channel(index: usize) -> Color32 {
+    match index % 4 {
+        0 => ch1(),
+        1 => ch2(),
+        2 => pick(rgb(100, 150, 255), rgb(25, 75, 205)),
+        _ => pick(rgb(255, 95, 95), rgb(185, 30, 30)),
+    }
+}
+
 pub fn trigger() -> Color32 {
     pick(rgb(255, 140, 0), rgb(210, 85, 0))
 }
@@ -157,6 +168,8 @@ mod tests {
             for c in [
                 ch1(),
                 ch2(),
+                channel(2),
+                channel(3),
                 trigger(),
                 time_cursor(),
                 volt_cursor(),

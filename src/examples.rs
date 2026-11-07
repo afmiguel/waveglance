@@ -74,8 +74,8 @@ mod tests {
     #[test]
     fn all_examples_parse() {
         for e in EXAMPLES {
-            let w = crate::parser::parse(e.bytes).unwrap_or_else(|err| panic!("{}: {err}", e.file));
-            assert!(w.ch1.is_some(), "{}", e.file);
+            let w = crate::formats::open(e.bytes).unwrap_or_else(|err| panic!("{}: {err}", e.file));
+            assert!(w.trace("CH1").is_some(), "{}", e.file);
         }
     }
 }

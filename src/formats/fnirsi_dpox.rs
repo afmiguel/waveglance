@@ -1,10 +1,4 @@
-//! Parser for the binary `.wav` files of FNIRSI oscilloscopes.
-//!
-//! [`parse`] detects the model from the bytes:
-//! - DPOX180H: the format described below.
-//! - 1013D / 1014D (original firmware): see [`crate::fnirsi1013d`].
-//!
-//! # DPOX180H
+//! Reader for the binary `.wav` files of the FNIRSI DPOX180H.
 //!
 //! The file is NOT a RIFF/WAV audio file. It is a big-endian dump of the
 //! scope state. All offsets below are absolute file offsets.
@@ -42,6 +36,8 @@
 //! the probe factor: voltages are at the probe tip. A 1X capture at 200 mV/div
 //! and a 10X capture at 2 V/div of the same signal have the same ADC codes.
 
+use super::{AdcScale, Confidence, Format, ReadError, adc_trace};
+use crate::model::{Acquisition, Capture, Source, Trace};
 use binrw::{BinRead, BinReaderExt};
 use std::io::Cursor;
 
@@ -73,11 +69,6 @@ pub enum ParseError {
     NoChannels,
     /// The time/div or sample rate field is zero.
     BadTiming(String),
-    /// The file is not from a supported model.
-    UnknownFormat(usize),
-    /// A 1013D/1014D file with a header value that the original firmware
-    /// does not write (another firmware, or a damaged file).
-    Unsupported1013D(String),
 }
 
 impl std::fmt::Display for ParseError {
@@ -90,14 +81,6 @@ impl std::fmt::Display for ParseError {
                 write!(f, "the file contains no channel data (CH1 and CH2 are off)")
             }
             Self::BadTiming(e) => write!(f, "invalid timing data: {e}"),
-            Self::UnknownFormat(n) => write!(
-                f,
-                "unknown file ({n} bytes): not a DPOX180H or 1013D/1014D waveform"
-            ),
-            Self::Unsupported1013D(e) => write!(
-                f,
-                "1013D/1014D file not supported: {e}. Only the original FNIRSI firmware is supported (not Peco or Atlan)"
-            ),
         }
     }
 }
@@ -145,149 +128,24 @@ pub struct RawHeader {
 /// The smallest file that can hold all header fields.
 pub const MIN_HEADER_LEN: usize = 0x1D9 + 4;
 
-/// The oscilloscope that saved the file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Model {
-    Dpox180h,
-    /// FNIRSI 1013D or 1014D (same file format; original firmware).
-    Fnirsi1013D,
-}
+/// The DPOX180H `.wav` format.
+pub struct DpoxFormat;
 
-impl Model {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Dpox180h => "DPOX180H",
-            Self::Fnirsi1013D => "1013D/1014D",
+impl Format for DpoxFormat {
+    fn name(&self) -> &'static str {
+        "FNIRSI DPOX180H (.wav)"
+    }
+
+    fn probe(&self, bytes: &[u8]) -> Confidence {
+        if looks_like_dpox180h(bytes) {
+            Confidence::Sure
+        } else {
+            Confidence::No
         }
     }
-}
 
-/// Input coupling of a channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Coupling {
-    Dc,
-    Ac,
-}
-
-impl Coupling {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Dc => "DC",
-            Self::Ac => "AC",
-        }
-    }
-}
-
-/// Trigger settings, when the file stores them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Trigger {
-    /// "Auto", "Single" or "Normal".
-    pub mode: &'static str,
-    /// True for the rising edge.
-    pub rising: bool,
-    /// Trigger source channel: 1 or 2.
-    pub source: u8,
-}
-
-/// How the scope acquired the samples.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Acquisition {
-    /// Real-time sampling at `sample_rate_hz`. Trigger at the buffer centre.
-    RealTime { sample_rate_hz: f64 },
-    /// Equivalent-time sampling (fast timebases). The buffer holds `frames`
-    /// screen frames of `ETS_FRAME_LEN` points. Trigger at the frame centre.
-    Equivalent { frames: usize },
-}
-
-/// One decoded channel.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Channel {
-    /// Volts per division at the probe tip, as shown on the scope.
-    /// It already includes `probe_factor`.
-    pub volts_per_div: f64,
-    /// Probe attenuation set in the scope menu (1.0 = 1X, 10.0 = 10X).
-    pub probe_factor: f64,
-    /// ADC code that is 0 V (from the ground marker position).
-    pub ground_adc: f64,
-    /// ADC codes per vertical division.
-    pub counts_per_div: f64,
-    /// ADC code at the vertical centre of the screen.
-    pub center_code: f64,
-    /// Highest ADC code. Codes 0 and `code_max` are at the limit of the
-    /// input range (the signal is clipped).
-    pub code_max: u16,
-    /// Input coupling, if the file stores it.
-    pub coupling: Option<Coupling>,
-    /// Raw ADC samples, as stored in the file.
-    pub raw: Vec<u16>,
-    /// Plot points: `[time_s, volts]`. Only the samples that make one
-    /// acquisition (one frame in ETS mode).
-    pub points: Vec<[f64; 2]>,
-    /// True if any plotted sample is at the ADC limit (0 or 12800).
-    pub clipped: bool,
-}
-
-impl Channel {
-    /// Position of 0 V on the screen, in divisions from the centre (up is
-    /// positive). This is where the scope draws the ground marker.
-    pub fn ground_div(&self) -> f64 {
-        (self.ground_adc - self.center_code) / self.counts_per_div
-    }
-
-    /// Smallest voltage step: one ADC code, in volts.
-    pub fn lsb_volts(&self) -> f64 {
-        self.volts_per_div / self.counts_per_div
-    }
-
-    /// Time between two plotted samples, in seconds.
-    pub fn sample_interval(&self) -> Option<f64> {
-        let p = self.points.get(..2)?;
-        Some(p[1][0] - p[0][0])
-    }
-
-    /// True if a plotted sample with a time inside `window` is at the limit
-    /// of the input range.
-    pub fn clipped_in(&self, window: &std::ops::RangeInclusive<f64>) -> bool {
-        self.points
-            .iter()
-            .zip(&self.raw)
-            .any(|(p, &code)| window.contains(&p[0]) && (code == 0 || code >= self.code_max))
-    }
-
-    /// Convert one ADC code to volts.
-    pub fn adc_to_volts(&self, adc: u16) -> f64 {
-        (f64::from(adc) - self.ground_adc) / self.counts_per_div * self.volts_per_div
-    }
-}
-
-/// A fully decoded waveform file.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Waveform {
-    pub model: Model,
-    /// Trigger settings, if the file stores them.
-    pub trigger: Option<Trigger>,
-    pub ch1: Option<Channel>,
-    pub ch2: Option<Channel>,
-    /// Seconds per horizontal division.
-    pub time_per_div_s: f64,
-    pub acquisition: Acquisition,
-    /// Samples per channel in the file.
-    pub samples_per_channel: usize,
-    /// Non-fatal problems found while parsing.
-    pub warnings: Vec<String>,
-}
-
-/// Parse the bytes of a FNIRSI `.wav` file. The model is found from the bytes.
-///
-/// # Errors
-/// Returns a [`ParseError`] if the bytes are not a waveform of a supported model.
-pub fn parse(bytes: &[u8]) -> Result<Waveform, ParseError> {
-    if looks_like_dpox180h(bytes) {
-        parse_dpox180h(bytes)
-    } else if bytes.len() == crate::fnirsi1013d::FILE_SIZE {
-        crate::fnirsi1013d::parse(bytes)
-    } else {
-        Err(ParseError::UnknownFormat(bytes.len()))
+    fn read(&self, bytes: &[u8]) -> Result<Capture, ReadError> {
+        read(bytes).map_err(|e| ReadError(e.to_string()))
     }
 }
 
@@ -302,11 +160,11 @@ fn looks_like_dpox180h(bytes: &[u8]) -> bool {
     be32(0) == Some(0x32) && be32(0x18) == Some(bytes.len() as u32)
 }
 
-/// Parse the bytes of a DPOX180H `.wav` file.
+/// Read the bytes of a DPOX180H `.wav` file.
 ///
 /// # Errors
 /// Returns a [`ParseError`] if the bytes are not a valid DPOX180H waveform.
-pub fn parse_dpox180h(bytes: &[u8]) -> Result<Waveform, ParseError> {
+pub fn read(bytes: &[u8]) -> Result<Capture, ParseError> {
     if bytes.len() < MIN_HEADER_LEN {
         return Err(ParseError::TooShort(bytes.len()));
     }
@@ -361,10 +219,11 @@ pub fn parse_dpox180h(bytes: &[u8]) -> Result<Waveform, ParseError> {
     };
 
     let mut slot = 0;
-    let mut make = |on: bool, uv: u64, marker: u16, probe: u64, name: &str| -> Option<Channel> {
+    let mut make = |on: bool, uv: u64, marker: u16, probe: u64, number: u8| -> Option<Trace> {
         if !on {
             return None;
         }
+        let name = format!("CH{number}");
         let raw = samples(slot);
         slot += 1;
         if uv == 0 {
@@ -379,33 +238,42 @@ pub fn parse_dpox180h(bytes: &[u8]) -> Result<Waveform, ParseError> {
         } else {
             probe as f64 / 10_000.0
         };
-        let mut ch = build_channel(raw, volts_per_div, marker, acquisition, time_per_div_s);
-        ch.probe_factor = probe_factor;
-        Some(ch)
+        Some(build_trace(
+            number,
+            &raw,
+            volts_per_div,
+            marker,
+            probe_factor,
+            acquisition,
+            time_per_div_s,
+        ))
     };
     let ch1 = make(
         ch1_on,
         header.ch1_uv_per_div,
         header.ch1_marker_px,
         header.ch1_probe_x10000,
-        "CH1",
+        1,
     );
     let ch2 = make(
         ch2_on,
         header.ch2_uv_per_div,
         header.ch2_marker_px,
         header.ch2_probe_x10000,
-        "CH2",
+        2,
     );
 
-    Ok(Waveform {
-        model: Model::Dpox180h,
+    Ok(Capture {
+        source: Source {
+            vendor: "FNIRSI".into(),
+            model: "DPOX180H".into(),
+            format: DpoxFormat.name().into(),
+        },
+        traces: [ch1, ch2].into_iter().flatten().collect(),
+        time_per_div: Some(time_per_div_s),
         trigger: None,
-        ch1,
-        ch2,
-        time_per_div_s,
         acquisition,
-        samples_per_channel: n,
+        record_length: n,
         warnings,
     })
 }
@@ -453,44 +321,36 @@ fn detect_acquisition(h: &RawHeader, n: usize, tdiv: f64) -> Result<Acquisition,
     })
 }
 
-fn build_channel(
-    raw: Vec<u16>,
+/// One channel: the codes of one acquisition (one frame in ETS mode) to
+/// volts, with the trigger (t = 0) at the centre.
+fn build_trace(
+    number: u8,
+    raw: &[u16],
     volts_per_div: f64,
     marker_px: u16,
+    probe: f64,
     acq: Acquisition,
     tdiv: f64,
-) -> Channel {
-    let ground_adc = ADC_CENTER
+) -> Trace {
+    let zero_code = ADC_CENTER
         + (f64::from(marker_px) - MARKER_CENTER_PX) * (ADC_COUNTS_PER_DIV / PIXELS_PER_DIV);
-    let mut ch = Channel {
-        volts_per_div,
-        probe_factor: 1.0,
-        ground_adc,
+    let scale = AdcScale {
+        per_div: volts_per_div,
         counts_per_div: ADC_COUNTS_PER_DIV,
+        zero_code,
         center_code: ADC_CENTER,
-        code_max: ADC_MAX,
-        coupling: None,
-        raw,
-        points: Vec::new(),
-        clipped: false,
+        code_max: f64::from(ADC_MAX),
     };
-
     // Time of sample i: t = (i - trigger_index) * dt. Trigger = t = 0.
     let (len, dt) = match acq {
-        Acquisition::RealTime { sample_rate_hz } => (ch.raw.len(), 1.0 / sample_rate_hz),
+        Acquisition::RealTime { sample_rate_hz } => (raw.len(), 1.0 / sample_rate_hz),
         // One ETS frame is one screen: 12 divisions in 300 points.
         Acquisition::Equivalent { .. } => {
             (ETS_FRAME_LEN, tdiv * SCREEN_DIVS_X / ETS_FRAME_LEN as f64)
         }
     };
-    let trigger = len as f64 / 2.0;
-    ch.points = ch.raw[..len]
-        .iter()
-        .enumerate()
-        .map(|(i, &adc)| [(i as f64 - trigger) * dt, ch.adc_to_volts(adc)])
-        .collect();
-    ch.clipped = ch.raw[..len].iter().any(|&v| v == 0 || v >= ADC_MAX);
-    ch
+    let t0 = -(len as f64 / 2.0) * dt;
+    adc_trace(number, &raw[..len], scale, t0, dt, probe, None)
 }
 
 #[cfg(test)]
@@ -563,9 +423,13 @@ mod tests {
         }
     }
 
+    fn trace<'a>(c: &'a Capture, label: &str) -> &'a Trace {
+        c.trace(label).unwrap_or_else(|| panic!("no {label}"))
+    }
+
     #[test]
     fn dual_channel_real_time() {
-        let w = parse(&real_time_fake().bytes()).unwrap();
+        let w = read(&real_time_fake().bytes()).unwrap();
         assert!(w.warnings.is_empty(), "{:?}", w.warnings);
         assert_eq!(
             w.acquisition,
@@ -573,18 +437,18 @@ mod tests {
                 sample_rate_hz: 1e8
             }
         );
-        assert_eq!(w.samples_per_channel, 2400);
-        let ch1 = w.ch1.unwrap();
+        assert_eq!(w.record_length, 2400);
+        let ch1 = trace(&w, "CH1");
         // One division above ground at 200 mV/div is +0.2 V.
-        assert!((ch1.points[0][1] - 0.2).abs() < 1e-12);
+        assert!((ch1.points()[0][1] - 0.2).abs() < 1e-6);
         // Trigger in the buffer centre: first sample at -12 µs.
-        assert!((ch1.points[0][0] + 12e-6).abs() < 1e-15);
-        assert!((ch1.points[1200][0]).abs() < 1e-15);
-        let ch2 = w.ch2.unwrap();
-        // Marker 50 px = 2 divisions below centre, so ADC 3200 is 0 V.
-        assert_eq!(ch2.ground_adc, 3200.0);
-        assert_eq!(ch2.probe_factor, 10.0);
-        assert!(ch2.points.iter().all(|p| p[1].abs() < 1e-12));
+        assert!((ch1.points()[0][0] + 12e-6).abs() < 1e-15);
+        assert!((ch1.points()[1200][0]).abs() < 1e-15);
+        let ch2 = trace(&w, "CH2");
+        // Marker 50 px = 2 divisions below centre: 0 V is at -2 div.
+        assert_eq!(ch2.display.zero_div, -2.0);
+        assert_eq!(ch2.display.probe, 10.0);
+        assert!(ch2.points().iter().all(|p| p[1].abs() < 1e-9));
     }
 
     #[test]
@@ -592,14 +456,13 @@ mod tests {
         let mut f = real_time_fake();
         f.ch1 = Some((1_000_000, 100, vec![6400; 2400]));
         f.ch2 = Some((1_000_000, 100, vec![8000; 2400]));
-        let w = parse(&f.bytes()).unwrap();
-        assert!(w.ch1.unwrap().points.iter().all(|p| p[1] == 0.0));
+        let w = read(&f.bytes()).unwrap();
+        assert!(trace(&w, "CH1").points().iter().all(|p| p[1] == 0.0));
         assert!(
-            w.ch2
-                .unwrap()
-                .points
+            trace(&w, "CH2")
+                .points()
                 .iter()
-                .all(|p| (p[1] - 1.0).abs() < 1e-12)
+                .all(|p| (p[1] - 1.0).abs() < 1e-6)
         );
     }
 
@@ -607,9 +470,9 @@ mod tests {
     fn only_ch2_enabled() {
         let mut f = real_time_fake();
         f.ch1 = None;
-        let w = parse(&f.bytes()).unwrap();
-        assert!(w.ch1.is_none());
-        assert_eq!(w.ch2.unwrap().raw.len(), 2400);
+        let w = read(&f.bytes()).unwrap();
+        assert!(w.trace("CH1").is_none());
+        assert_eq!(trace(&w, "CH2").samples.len(), 2400);
     }
 
     #[test]
@@ -622,49 +485,46 @@ mod tests {
             rate: 705_032_704,
             tdiv_ps: 5_000,
         };
-        let w = parse(&f.bytes()).unwrap();
+        let w = read(&f.bytes()).unwrap();
         assert_eq!(w.acquisition, Acquisition::Equivalent { frames: 10 });
-        let ch1 = w.ch1.unwrap();
-        assert_eq!(ch1.points.len(), 300);
+        let ch1 = trace(&w, "CH1");
+        assert_eq!(ch1.points().len(), 300);
         // 12 divisions x 5 ns = 60 ns, centred on the trigger.
-        assert!((ch1.points[0][0] + 30e-9).abs() < 1e-18);
-        assert!((ch1.points[150][0]).abs() < 1e-18);
-        assert!(ch1.clipped);
+        assert!((ch1.points()[0][0] + 30e-9).abs() < 1e-18);
+        assert!((ch1.points()[150][0]).abs() < 1e-18);
+        assert!(ch1.clipped());
     }
 
     #[test]
     fn rejects_bad_input() {
-        assert_eq!(parse(&[0; 10]), Err(ParseError::UnknownFormat(10)));
-        assert_eq!(parse_dpox180h(&[0; 10]), Err(ParseError::TooShort(10)));
+        assert_eq!(read(&[0; 10]), Err(ParseError::TooShort(10)));
         let mut riff = real_time_fake().bytes();
         riff[..4].copy_from_slice(b"RIFF");
-        assert!(matches!(parse(&riff), Err(ParseError::UnknownFormat(_))));
-        assert!(matches!(
-            parse_dpox180h(&riff),
-            Err(ParseError::BadSectionTable(_))
-        ));
+        assert_eq!(DpoxFormat.probe(&riff), Confidence::No);
+        assert!(matches!(read(&riff), Err(ParseError::BadSectionTable(_))));
         let mut truncated = real_time_fake().bytes();
         truncated.pop();
+        assert_eq!(DpoxFormat.probe(&truncated), Confidence::No);
         assert!(matches!(
-            parse(&truncated),
-            Err(ParseError::UnknownFormat(_))
-        ));
-        assert!(matches!(
-            parse_dpox180h(&truncated),
+            read(&truncated),
             Err(ParseError::BadSectionTable(_))
         ));
         let mut off = real_time_fake();
         off.ch1 = None;
         off.ch2 = None;
-        assert_eq!(parse(&off.bytes()), Err(ParseError::NoChannels));
+        assert_eq!(read(&off.bytes()), Err(ParseError::NoChannels));
+        assert_eq!(
+            DpoxFormat.probe(&real_time_fake().bytes()),
+            Confidence::Sure
+        );
     }
 
     #[test]
     fn sample_count_mismatch_is_a_warning() {
         let mut b = real_time_fake().bytes();
         b[0x12D..0x131].copy_from_slice(&999u32.to_be_bytes());
-        let w = parse(&b).unwrap();
-        assert_eq!(w.samples_per_channel, 2400);
+        let w = read(&b).unwrap();
+        assert_eq!(w.record_length, 2400);
         assert_eq!(w.warnings.len(), 1);
     }
 }

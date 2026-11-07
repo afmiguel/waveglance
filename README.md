@@ -97,6 +97,20 @@ trunk build --release --public-url /fnirsi-viewer/
 Then publish the `dist/` folder. The workflow `.github/workflows/pages.yml` does
 this on each push to `main`.
 
+## Code structure
+
+| Path | Contents |
+|------|----------|
+| `src/model.rs` | Internal model: `Capture`, `Trace`, `Samples`, display settings |
+| `src/formats/` | One module per file format, detection (`probe`) and `open` |
+| `src/app/` | User interface: `mod.rs` (state), `menus`, `readouts`, `plot`, `input`, `dialogs`, `actions`, `format` |
+| `src/measure.rs`, `src/fft.rs`, `src/cursors.rs` | Measurements, spectrum, cursors (work on any trace) |
+| `src/export.rs`, `src/examples.rs`, `src/palette.rs` | CSV/PNG/print, built-in examples, colours |
+
+To add a file format: write a module in `src/formats/` that implements
+`Format` (`name`, `probe`, `read` → `Capture`), add it to `FORMATS`, and add
+tests with real files.
+
 ## Versions
 
 See [CHANGELOG.md](CHANGELOG.md). The version is in `Cargo.toml`. The app shows

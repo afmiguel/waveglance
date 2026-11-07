@@ -1,18 +1,20 @@
 //! Export: the samples as CSV, a screenshot as PNG, and saving a file
 //! (a save dialog on the desktop, a download in the browser).
 
-use crate::parser::{Acquisition, Waveform};
+use crate::model::{Acquisition, Capture};
 use eframe::egui::ColorImage;
 use std::fmt::Write as _;
 
-/// The samples of a waveform as CSV: a few `#` comment lines with the
+/// The samples of a capture as CSV: a few `#` comment lines with the
 /// settings, a header line, then one line per sample: time (s) and the
-/// voltage (V) of each channel that is on.
-pub fn csv(w: &Waveform, file_name: &str, app_version: &str) -> String {
+/// value of each trace (traces with the same sample times share the lines).
+pub fn csv(w: &Capture, file_name: &str, app_version: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "# FNIRSI Viewer {app_version}");
-    let _ = writeln!(out, "# file: {file_name}; model: {}", w.model.name());
-    let _ = writeln!(out, "# time/div: {} s", num(w.time_per_div_s));
+    let _ = writeln!(out, "# file: {file_name}; source: {}", w.source.title());
+    if let Some(t) = w.time_per_div {
+        let _ = writeln!(out, "# time/div: {} s", num(t));
+    }
     match w.acquisition {
         Acquisition::RealTime { sample_rate_hz } => {
             let _ = writeln!(
@@ -28,44 +30,36 @@ pub fn csv(w: &Waveform, file_name: &str, app_version: &str) -> String {
             );
         }
     }
-    let channels: Vec<(&str, &crate::parser::Channel)> = [("ch1", &w.ch1), ("ch2", &w.ch2)]
-        .into_iter()
-        .filter_map(|(n, c)| c.as_ref().map(|c| (n, c)))
-        .collect();
-    for (name, ch) in &channels {
-        let coupling = ch
+    for t in &w.traces {
+        let coupling = t
+            .display
             .coupling
             .map_or(String::new(), |c| format!(", {}", c.name()));
         let _ = writeln!(
             out,
-            "# {}: {} V/div, probe {}X{coupling}",
-            name.to_uppercase(),
-            num(ch.volts_per_div),
-            num(ch.probe_factor)
+            "# {}: {} {}/div, probe {}X{coupling}",
+            t.label,
+            num(t.display.per_div),
+            t.unit.symbol(),
+            num(t.display.probe)
         );
     }
     out.push_str("time_s");
-    for (name, _) in &channels {
-        let _ = write!(out, ",{name}_V");
+    for t in &w.traces {
+        let _ = write!(out, ",{}_{}", t.label.to_lowercase(), t.unit.symbol());
     }
     out.push('\n');
-    let rows = channels
-        .iter()
-        .map(|(_, c)| c.points.len())
-        .max()
-        .unwrap_or(0);
+    let points: Vec<&[[f64; 2]]> = w.traces.iter().map(|t| t.points()).collect();
+    let rows = points.iter().map(|p| p.len()).max().unwrap_or(0);
     for i in 0..rows {
-        let Some(t) = channels
-            .iter()
-            .find_map(|(_, c)| c.points.get(i).map(|p| p[0]))
-        else {
+        let Some(t) = points.iter().find_map(|p| p.get(i).map(|q| q[0])) else {
             continue;
         };
-        let _ = write!(out, "{}", num(t));
-        for (_, ch) in &channels {
-            match ch.points.get(i) {
-                Some(p) => {
-                    let _ = write!(out, ",{}", num(p[1]));
+        out.push_str(&num(t));
+        for p in &points {
+            match p.get(i) {
+                Some(q) => {
+                    let _ = write!(out, ",{}", num(q[1]));
                 }
                 None => out.push(','),
             }
@@ -246,7 +240,7 @@ mod tests {
     #[test]
     fn csv_of_an_example() {
         let e = &crate::examples::EXAMPLES[0];
-        let w = crate::parser::parse(e.bytes).unwrap();
+        let w = crate::formats::open(e.bytes).unwrap();
         let text = csv(&w, e.file, "0.0.0");
         let lines: Vec<&str> = text.lines().collect();
         let header = lines.iter().position(|l| !l.starts_with('#')).unwrap();

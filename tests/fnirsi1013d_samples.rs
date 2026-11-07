@@ -3,15 +3,16 @@
 //! Expected values were read from the screenshots of the same captures
 //! (lexus2026HA/FNIRSI-2C53T-Decoder, tests/test_1013d.py).
 
+use fnirsi_viewer::formats;
 use fnirsi_viewer::measure::{Measurement, measure};
-use fnirsi_viewer::parser::{self, Coupling, Model, Waveform};
+use fnirsi_viewer::model::{Capture, Coupling};
 use std::path::PathBuf;
 
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/fnirsi1013d")
 }
 
-fn load(n: u32) -> Waveform {
+fn load(n: u32) -> Capture {
     let path = data_dir().join(format!("{n}.wav"));
     let bytes = std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
@@ -19,7 +20,7 @@ fn load(n: u32) -> Waveform {
             path.display()
         )
     });
-    parser::parse(&bytes).unwrap_or_else(|e| panic!("{n}.wav: {e}"))
+    formats::open(&bytes).unwrap_or_else(|e| panic!("{n}.wav: {e}"))
 }
 
 #[test]
@@ -36,15 +37,15 @@ fn settings_match_the_screenshots() {
     ];
     for (n, tdiv, v1, c1, ch2_on, v2) in truth {
         let w = load(n);
-        assert_eq!(w.model, Model::Fnirsi1013D, "{n}");
-        assert_eq!(w.samples_per_channel, 1500, "{n}");
-        assert!((w.time_per_div_s - tdiv).abs() < tdiv * 1e-9, "{n}");
-        let ch1 = w.ch1.as_ref().unwrap();
-        assert!((ch1.volts_per_div - v1).abs() < 1e-12, "{n}");
-        assert_eq!(ch1.coupling, Some(c1), "{n}");
-        assert_eq!(w.ch2.is_some(), ch2_on, "{n}");
-        if let Some(ch2) = &w.ch2 {
-            assert!((ch2.volts_per_div - v2).abs() < 1e-12, "{n}");
+        assert_eq!(w.source.model, "1013D/1014D", "{n}");
+        assert_eq!(w.record_length, 1500, "{n}");
+        assert!((w.time_per_div.unwrap() - tdiv).abs() < tdiv * 1e-9, "{n}");
+        let ch1 = w.trace("CH1").unwrap();
+        assert!((ch1.display.per_div - v1).abs() < 1e-12, "{n}");
+        assert_eq!(ch1.display.coupling, Some(c1), "{n}");
+        assert_eq!(w.trace("CH2").is_some(), ch2_on, "{n}");
+        if let Some(ch2) = w.trace("CH2") {
+            assert!((ch2.display.per_div - v2).abs() < 1e-12, "{n}");
         }
     }
 }
@@ -53,9 +54,9 @@ fn settings_match_the_screenshots() {
 fn values_match_the_scope_readout() {
     // Screen of file 1: CH1 Vpp 3.17 V, Freq 1.00 kHz (1 V/div DC, 500 µs/div).
     let w = load(1);
-    let ch1 = w.ch1.as_ref().unwrap();
-    let all = ch1.points[0][0]..=ch1.points.last().unwrap()[0];
-    let r = measure(&ch1.points, &all, 0.1 * ch1.volts_per_div);
+    let ch1 = w.trace("CH1").unwrap();
+    let all = ch1.points()[0][0]..=ch1.points().last().unwrap()[0];
+    let r = measure(ch1.points(), &all, 0.1 * ch1.display.per_div);
     let vpp = r.get(Measurement::Vpp).unwrap();
     assert!((vpp - 3.17).abs() < 0.1, "Vpp = {vpp}");
     let f = r.get(Measurement::Frequency).unwrap();
@@ -70,8 +71,8 @@ fn trigger_is_at_the_buffer_centre() {
     for n in [1, 8, 13, 15, 17, 18] {
         let w = load(n);
         let t = w.trigger.as_ref().unwrap();
-        assert!(t.rising && t.source == 1, "{n}");
-        let pts = &w.ch1.as_ref().unwrap().points;
+        assert!(t.rising && t.source.as_deref() == Some("CH1"), "{n}");
+        let pts = w.trace("CH1").unwrap().points();
         let (lo, hi) = pts.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
             (lo.min(p[1]), hi.max(p[1]))
         });
@@ -95,9 +96,9 @@ fn all_1013d_files_parse() {
     for entry in std::fs::read_dir(data_dir()).expect("run scripts/fetch-samples.sh first") {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "wav") {
-            let w = parser::parse(&std::fs::read(&path).unwrap())
+            let w = formats::open(&std::fs::read(&path).unwrap())
                 .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            assert_eq!(w.model, Model::Fnirsi1013D);
+            assert_eq!(w.source.model, "1013D/1014D");
             count += 1;
         }
     }

@@ -4,14 +4,15 @@
 //! `*_src.png` screenshots in the source repository and the thumbnail
 //! that each file contains).
 
-use fnirsi_viewer::parser::{self, Acquisition, Channel, Model, Waveform};
+use fnirsi_viewer::formats;
+use fnirsi_viewer::model::{Acquisition, Capture, Trace};
 use std::path::PathBuf;
 
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/dpox180h")
 }
 
-fn load(name: &str) -> Waveform {
+fn load(name: &str) -> Capture {
     let path = data_dir().join(name);
     let bytes = std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
@@ -19,29 +20,35 @@ fn load(name: &str) -> Waveform {
             path.display()
         )
     });
-    parser::parse(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"))
+    formats::open(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
-fn vpp(ch: &Channel) -> f64 {
-    let (lo, hi) = ch.points.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
-        (lo.min(p[1]), hi.max(p[1]))
-    });
+fn vpp(ch: &Trace) -> f64 {
+    let (lo, hi) = ch
+        .points()
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+            (lo.min(p[1]), hi.max(p[1]))
+        });
     hi - lo
 }
 
-fn mean(ch: &Channel) -> f64 {
-    ch.points.iter().map(|p| p[1]).sum::<f64>() / ch.points.len() as f64
+fn mean(ch: &Trace) -> f64 {
+    ch.points().iter().map(|p| p[1]).sum::<f64>() / ch.points().len() as f64
 }
 
 /// Times of rising crossings through the mid level, with hysteresis.
-fn rising_edges(ch: &Channel) -> Vec<f64> {
-    let (lo, hi) = ch.points.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
-        (lo.min(p[1]), hi.max(p[1]))
-    });
+fn rising_edges(ch: &Trace) -> Vec<f64> {
+    let (lo, hi) = ch
+        .points()
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+            (lo.min(p[1]), hi.max(p[1]))
+        });
     let (mid, band) = ((lo + hi) / 2.0, (hi - lo) * 0.2);
     let mut armed = false;
     let mut edges = Vec::new();
-    for p in &ch.points {
+    for p in ch.points() {
         if p[1] < mid - band {
             armed = true;
         } else if armed && p[1] > mid + band {
@@ -57,27 +64,27 @@ fn square_100khz_real_time() {
     // Screen: CH1 200 mV/div, CH2 5 mV/div (off), H = 5 µs, F 99.98 kHz, Vpp 1.07 V.
     let w = load("100kHZ-1V.wav");
     assert!(w.warnings.is_empty(), "{:?}", w.warnings);
-    assert_eq!(w.model, Model::Dpox180h);
+    assert_eq!(w.source.model, "DPOX180H");
     assert!(w.trigger.is_none());
-    assert_eq!(w.samples_per_channel, 48_000);
+    assert_eq!(w.record_length, 48_000);
     assert_eq!(
         w.acquisition,
         Acquisition::RealTime {
             sample_rate_hz: 400e6
         }
     );
-    assert!((w.time_per_div_s - 5e-6).abs() < 1e-15);
-    assert!(w.ch2.is_none());
+    assert!((w.time_per_div.unwrap() - 5e-6).abs() < 1e-15);
+    assert!(w.trace("CH2").is_none());
 
-    let ch1 = w.ch1.as_ref().unwrap();
-    assert!((ch1.volts_per_div - 0.2).abs() < 1e-12);
-    assert_eq!(ch1.probe_factor, 1.0);
+    let ch1 = w.trace("CH1").unwrap();
+    assert!((ch1.display.per_div - 0.2).abs() < 1e-12);
+    assert_eq!(ch1.display.probe, 1.0);
     assert!((vpp(ch1) - 1.07).abs() < 0.05, "Vpp = {}", vpp(ch1));
     // Symmetric square wave around ground: mean close to 0 V.
     assert!(mean(ch1).abs() < 0.03, "mean = {}", mean(ch1));
 
     // Buffer = 2 screens (2 x 12 div x 5 µs) centred on the trigger.
-    let (t0, t1) = (ch1.points[0][0], ch1.points.last().unwrap()[0]);
+    let (t0, t1) = (ch1.points()[0][0], ch1.points().last().unwrap()[0]);
     assert!(
         (t0 + 60e-6).abs() < 1e-9 && (t1 - 60e-6).abs() < 1e-8,
         "{t0} .. {t1}"
@@ -100,22 +107,22 @@ fn square_100khz_real_time() {
 fn sine_10mhz_equivalent_time() {
     // Screen: CH1 200 mV/div, CH2 1 V/div (off), H = 5 ns, F 10 MHz, Vpp 968 mV.
     let w = load("10MHz-1V.wav");
-    assert_eq!(w.samples_per_channel, 3000);
+    assert_eq!(w.record_length, 3000);
     assert_eq!(w.acquisition, Acquisition::Equivalent { frames: 10 });
-    assert!((w.time_per_div_s - 5e-9).abs() < 1e-18);
+    assert!((w.time_per_div.unwrap() - 5e-9).abs() < 1e-18);
 
-    let ch1 = w.ch1.as_ref().unwrap();
-    assert!((ch1.volts_per_div - 0.2).abs() < 1e-12);
-    assert_eq!(ch1.points.len(), 300);
+    let ch1 = w.trace("CH1").unwrap();
+    assert!((ch1.display.per_div - 0.2).abs() < 1e-12);
+    assert_eq!(ch1.points().len(), 300);
     // 60 ns of a 100 ns period: the frame shows about 0.6 of the sine.
     assert!(vpp(ch1) > 0.8 && vpp(ch1) < 1.0, "Vpp = {}", vpp(ch1));
     // Rising slope through the trigger at the screen centre.
-    let mid = &ch1.points[140..160];
+    let mid = &ch1.points()[140..160];
     assert!(mid.windows(2).all(|p| p[1][1] >= p[0][1] - 0.01));
     assert!(
-        ch1.points[150][1].abs() < 0.1,
+        ch1.points()[150][1].abs() < 0.1,
         "v(0) = {}",
-        ch1.points[150][1]
+        ch1.points()[150][1]
     );
 }
 
@@ -123,10 +130,10 @@ fn sine_10mhz_equivalent_time() {
 fn open_input_is_zero_volts() {
     // 1 V/div with the probe set to 10X: noise only, near 0 V.
     let w = load("Waveform-google/open.wav");
-    let ch1 = w.ch1.as_ref().unwrap();
-    assert_eq!(ch1.probe_factor, 10.0);
-    assert!((ch1.volts_per_div - 1.0).abs() < 1e-12);
-    let div = ch1.volts_per_div;
+    let ch1 = w.trace("CH1").unwrap();
+    assert_eq!(ch1.display.probe, 10.0);
+    assert!((ch1.display.per_div - 1.0).abs() < 1e-12);
+    let div = ch1.display.per_div;
     assert!(mean(ch1).abs() < 0.05 * div, "mean = {}", mean(ch1));
     assert!(vpp(ch1) < 0.1 * div, "Vpp = {}", vpp(ch1));
 }
@@ -137,9 +144,11 @@ fn probe_10x_reads_ten_times_the_1x_voltage() {
     // The ADC codes are the same; the probe-tip voltage is 10 times larger.
     let x1 = load("10MHz-1V.wav");
     let x10 = load("Waveform-google/10MHz-1V.wav");
-    let (a, b) = (x1.ch1.as_ref().unwrap(), x10.ch1.as_ref().unwrap());
-    assert_eq!((a.probe_factor, b.probe_factor), (1.0, 10.0));
-    assert!((a.volts_per_div / a.probe_factor - b.volts_per_div / b.probe_factor).abs() < 1e-12);
+    let (a, b) = (x1.trace("CH1").unwrap(), x10.trace("CH1").unwrap());
+    assert_eq!((a.display.probe, b.display.probe), (1.0, 10.0));
+    assert!(
+        (a.display.per_div / a.display.probe - b.display.per_div / b.display.probe).abs() < 1e-12
+    );
     // Two separate captures, and a 60 ns frame shows only part of the
     // 100 ns period, so the visible Vpp changes with the phase: allow ±10%.
     let ratio = vpp(b) / vpp(a);
@@ -159,9 +168,9 @@ fn all_sample_files_parse() {
         for entry in entries {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "wav") {
-                let w = parser::parse(&std::fs::read(&path).unwrap())
+                let w = formats::open(&std::fs::read(&path).unwrap())
                     .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-                assert!(w.ch1.is_some(), "{}", path.display());
+                assert!(w.trace("CH1").is_some(), "{}", path.display());
                 count += 1;
             }
         }
@@ -174,9 +183,9 @@ fn measurements_of_the_100khz_square() {
     // Scope screen: F 99.98 kHz, Vpp 1.07 V. The signal has short glitches.
     use fnirsi_viewer::measure::{Measurement, measure};
     let w = load("100kHZ-1V.wav");
-    let ch1 = w.ch1.as_ref().unwrap();
+    let ch1 = w.trace("CH1").unwrap();
     for window in [-60e-6..=60e-6, -30e-6..=30e-6] {
-        let r = measure(&ch1.points, &window, 0.1 * ch1.volts_per_div);
+        let r = measure(ch1.points(), &window, 0.1 * ch1.display.per_div);
         let f = r.get(Measurement::Frequency).unwrap();
         assert!((f - 99.98e3).abs() < 1e3, "{window:?}: f = {f}");
         let duty = r.get(Measurement::DutyCycle).unwrap();
@@ -192,9 +201,9 @@ fn fft_of_the_100khz_square() {
     // an amplitude of 4/π × 0.467 V, so 0.42 V RMS.
     use fnirsi_viewer::fft::{Window, spectrum};
     let w = load("100kHZ-1V.wav");
-    let ch1 = w.ch1.as_ref().unwrap();
-    let values: Vec<f64> = ch1.points.iter().map(|p| p[1]).collect();
-    let dt = ch1.points[1][0] - ch1.points[0][0];
+    let ch1 = w.trace("CH1").unwrap();
+    let values: Vec<f64> = ch1.points().iter().map(|p| p[1]).collect();
+    let dt = ch1.points()[1][0] - ch1.points()[0][0];
     // Frequency: Hanning, interpolated between the 6.1 kHz bins.
     let (f, _) = spectrum(&values, dt, Window::Hanning)
         .unwrap()

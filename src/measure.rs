@@ -148,8 +148,8 @@ impl Window {
 pub struct Settings {
     /// Selected measurements (shown in `Measurement::ALL` order).
     pub selected: Vec<Measurement>,
-    /// Measure CH1, CH2.
-    pub channels: [bool; 2],
+    /// Labels of the channels not to measure ("CH2"); the others are measured.
+    pub excluded: Vec<String>,
     pub window: Window,
     /// Show statistics over the cycles in the window (mean, min, max, σ, n).
     pub stats: bool,
@@ -159,7 +159,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             selected: vec![Measurement::Frequency, Measurement::Vpp],
-            channels: [true, true],
+            excluded: Vec::new(),
             window: Window::Screen,
             stats: false,
         }
@@ -167,6 +167,18 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Measure the channel with label `label`?
+    pub fn is_measured(&self, label: &str) -> bool {
+        !self.excluded.iter().any(|e| e == label)
+    }
+
+    pub fn set_measured(&mut self, label: &str, on: bool) {
+        self.excluded.retain(|e| e != label);
+        if !on {
+            self.excluded.push(label.to_owned());
+        }
+    }
+
     pub fn is_selected(&self, m: Measurement) -> bool {
         self.selected.contains(&m)
     }

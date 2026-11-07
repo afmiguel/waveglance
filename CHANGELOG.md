@@ -5,6 +5,24 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.9.0 — 2026-11-07
+
+Internal restructuring, to make room for other file formats. The app works
+as before.
+
+- New internal model (`src/model.rs`): a `Capture` with any number of
+  `Trace`s; samples in volts (4 bytes each, evenly spaced, or time/value
+  pairs); display settings (V/div, ground position, probe, coupling); input
+  limits for clipping. No FNIRSI-specific fields any more.
+- File formats in `src/formats/`: each format says how sure it is that a file
+  is its own (`probe`) and reads it (`read`); `formats::open` tries them from
+  the most to the least sure. FNIRSI DPOX180H and 1013D/1014D are the first two.
+- The app handles N channels (colours for CH1–CH4) instead of exactly CH1 and
+  CH2: OSD, measurements, cursors, FFT, search, reference, CSV export.
+- Math: choose A and B among the channels (A + B or A − B).
+- `app.rs` (3400 lines) split into modules: menus, readouts, plot, input,
+  dialogs, actions and number formatting.
+
 ## 0.8.0 — 2026-11-07
 
 - V/div of each channel: mouse wheel on the CH1 or CH2 readout (bottom bar)
