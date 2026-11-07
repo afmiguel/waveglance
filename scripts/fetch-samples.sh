@@ -23,3 +23,18 @@ mkdir -p "$DEST/Waveform-google"
 cp "$TMP"/dpox180h_tests/*.wav "$DEST/"
 cp "$TMP"/dpox180h_tests/Waveform-google/*.wav "$DEST/Waveform-google/"
 echo "Copied $(find "$DEST" -name '*.wav' | wc -l | tr -d ' ') files to $DEST"
+
+# FNIRSI 1013D files (and screenshots) from github.com/lexus2026HA/FNIRSI-2C53T-Decoder.
+# That repository is CC BY-NC 4.0, so the files are NOT committed here either.
+REPO2="https://github.com/lexus2026HA/FNIRSI-2C53T-Decoder.git"
+COMMIT2="5bdd72d14af1913d2cec81adfe5b09e1a45ac0fa"   # pinned: tests expect these files
+DEST2="$ROOT/tests/data/fnirsi1013d"
+TMP2="$(mktemp -d)"
+trap 'rm -rf "$TMP" "$TMP2"' EXIT
+git -C "$TMP2" init -q
+git -C "$TMP2" remote add origin "$REPO2"
+git -C "$TMP2" fetch -q --depth 1 origin "$COMMIT2"
+git -C "$TMP2" checkout -q FETCH_HEAD -- samples/1013d
+mkdir -p "$DEST2"
+cp "$TMP2"/samples/1013d/* "$DEST2/"
+echo "Copied $(find "$DEST2" -name '*.wav' | wc -l | tr -d ' ') files to $DEST2"

@@ -1,4 +1,10 @@
-//! Parser for the binary `.wav` files that the FNIRSI DPOX180H saves.
+//! Parser for the binary `.wav` files of FNIRSI oscilloscopes.
+//!
+//! [`parse`] detects the model from the bytes:
+//! - DPOX180H: the format described below.
+//! - 1013D / 1014D (original firmware): see [`crate::fnirsi1013d`].
+//!
+//! # DPOX180H
 //!
 //! The file is NOT a RIFF/WAV audio file. It is a big-endian dump of the
 //! scope state. All offsets below are absolute file offsets.
@@ -67,6 +73,11 @@ pub enum ParseError {
     NoChannels,
     /// The time/div or sample rate field is zero.
     BadTiming(String),
+    /// The file is not from a supported model.
+    UnknownFormat(usize),
+    /// A 1013D/1014D file with a header value that the original firmware
+    /// does not write (another firmware, or a damaged file).
+    Unsupported1013D(String),
 }
 
 impl std::fmt::Display for ParseError {
@@ -79,6 +90,14 @@ impl std::fmt::Display for ParseError {
                 write!(f, "the file contains no channel data (CH1 and CH2 are off)")
             }
             Self::BadTiming(e) => write!(f, "invalid timing data: {e}"),
+            Self::UnknownFormat(n) => write!(
+                f,
+                "unknown file ({n} bytes): not a DPOX180H or 1013D/1014D waveform"
+            ),
+            Self::Unsupported1013D(e) => write!(
+                f,
+                "1013D/1014D file not supported: {e}. Only the original FNIRSI firmware is supported (not Peco or Atlan)"
+            ),
         }
     }
 }
@@ -126,6 +145,50 @@ pub struct RawHeader {
 /// The smallest file that can hold all header fields.
 pub const MIN_HEADER_LEN: usize = 0x1D9 + 4;
 
+/// The oscilloscope that saved the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Model {
+    Dpox180h,
+    /// FNIRSI 1013D or 1014D (same file format; original firmware).
+    Fnirsi1013D,
+}
+
+impl Model {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dpox180h => "DPOX180H",
+            Self::Fnirsi1013D => "1013D/1014D",
+        }
+    }
+}
+
+/// Input coupling of a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coupling {
+    Dc,
+    Ac,
+}
+
+impl Coupling {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dc => "DC",
+            Self::Ac => "AC",
+        }
+    }
+}
+
+/// Trigger settings, when the file stores them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trigger {
+    /// "Auto", "Single" or "Normal".
+    pub mode: &'static str,
+    /// True for the rising edge.
+    pub rising: bool,
+    /// Trigger source channel: 1 or 2.
+    pub source: u8,
+}
+
 /// How the scope acquired the samples.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Acquisition {
@@ -146,6 +209,10 @@ pub struct Channel {
     pub probe_factor: f64,
     /// ADC code that is 0 V (from the ground marker position).
     pub ground_adc: f64,
+    /// ADC codes per vertical division.
+    pub counts_per_div: f64,
+    /// Input coupling, if the file stores it.
+    pub coupling: Option<Coupling>,
     /// Raw ADC samples, as stored in the file.
     pub raw: Vec<u16>,
     /// Plot points: `[time_s, volts]`. Only the samples that make one
@@ -158,14 +225,16 @@ pub struct Channel {
 impl Channel {
     /// Convert one ADC code to volts.
     pub fn adc_to_volts(&self, adc: u16) -> f64 {
-        (f64::from(adc) - self.ground_adc) / ADC_COUNTS_PER_DIV * self.volts_per_div
+        (f64::from(adc) - self.ground_adc) / self.counts_per_div * self.volts_per_div
     }
 }
 
 /// A fully decoded waveform file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Waveform {
-    pub header: RawHeader,
+    pub model: Model,
+    /// Trigger settings, if the file stores them.
+    pub trigger: Option<Trigger>,
     pub ch1: Option<Channel>,
     pub ch2: Option<Channel>,
     /// Seconds per horizontal division.
@@ -177,11 +246,36 @@ pub struct Waveform {
     pub warnings: Vec<String>,
 }
 
+/// Parse the bytes of a FNIRSI `.wav` file. The model is found from the bytes.
+///
+/// # Errors
+/// Returns a [`ParseError`] if the bytes are not a waveform of a supported model.
+pub fn parse(bytes: &[u8]) -> Result<Waveform, ParseError> {
+    if looks_like_dpox180h(bytes) {
+        parse_dpox180h(bytes)
+    } else if bytes.len() == crate::fnirsi1013d::FILE_SIZE {
+        crate::fnirsi1013d::parse(bytes)
+    } else {
+        Err(ParseError::UnknownFormat(bytes.len()))
+    }
+}
+
+/// A DPOX180H file starts with its section table: settings at offset 50 and
+/// a total size equal to the file size.
+fn looks_like_dpox180h(bytes: &[u8]) -> bool {
+    let be32 = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    be32(0) == Some(0x32) && be32(0x18) == Some(bytes.len() as u32)
+}
+
 /// Parse the bytes of a DPOX180H `.wav` file.
 ///
 /// # Errors
 /// Returns a [`ParseError`] if the bytes are not a valid DPOX180H waveform.
-pub fn parse(bytes: &[u8]) -> Result<Waveform, ParseError> {
+pub fn parse_dpox180h(bytes: &[u8]) -> Result<Waveform, ParseError> {
     if bytes.len() < MIN_HEADER_LEN {
         return Err(ParseError::TooShort(bytes.len()));
     }
@@ -274,7 +368,8 @@ pub fn parse(bytes: &[u8]) -> Result<Waveform, ParseError> {
     );
 
     Ok(Waveform {
-        header,
+        model: Model::Dpox180h,
+        trigger: None,
         ch1,
         ch2,
         time_per_div_s,
@@ -340,6 +435,8 @@ fn build_channel(
         volts_per_div,
         probe_factor: 1.0,
         ground_adc,
+        counts_per_div: ADC_COUNTS_PER_DIV,
+        coupling: None,
         raw,
         points: Vec::new(),
         clipped: false,
@@ -504,14 +601,23 @@ mod tests {
 
     #[test]
     fn rejects_bad_input() {
-        assert_eq!(parse(&[0; 10]), Err(ParseError::TooShort(10)));
+        assert_eq!(parse(&[0; 10]), Err(ParseError::UnknownFormat(10)));
+        assert_eq!(parse_dpox180h(&[0; 10]), Err(ParseError::TooShort(10)));
         let mut riff = real_time_fake().bytes();
         riff[..4].copy_from_slice(b"RIFF");
-        assert!(matches!(parse(&riff), Err(ParseError::BadSectionTable(_))));
+        assert!(matches!(parse(&riff), Err(ParseError::UnknownFormat(_))));
+        assert!(matches!(
+            parse_dpox180h(&riff),
+            Err(ParseError::BadSectionTable(_))
+        ));
         let mut truncated = real_time_fake().bytes();
         truncated.pop();
         assert!(matches!(
             parse(&truncated),
+            Err(ParseError::UnknownFormat(_))
+        ));
+        assert!(matches!(
+            parse_dpox180h(&truncated),
             Err(ParseError::BadSectionTable(_))
         ));
         let mut off = real_time_fake();

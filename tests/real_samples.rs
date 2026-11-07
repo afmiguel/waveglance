@@ -4,7 +4,7 @@
 //! `*_src.png` screenshots in the source repository and the thumbnail
 //! that each file contains).
 
-use fnirsi_viewer::parser::{self, Acquisition, Channel, Waveform};
+use fnirsi_viewer::parser::{self, Acquisition, Channel, Model, Waveform};
 use std::path::PathBuf;
 
 fn data_dir() -> PathBuf {
@@ -57,6 +57,8 @@ fn square_100khz_real_time() {
     // Screen: CH1 200 mV/div, CH2 5 mV/div (off), H = 5 µs, F 99.98 kHz, Vpp 1.07 V.
     let w = load("100kHZ-1V.wav");
     assert!(w.warnings.is_empty(), "{:?}", w.warnings);
+    assert_eq!(w.model, Model::Dpox180h);
+    assert!(w.trigger.is_none());
     assert_eq!(w.samples_per_channel, 48_000);
     assert_eq!(
         w.acquisition,

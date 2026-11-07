@@ -1,10 +1,18 @@
 # fnirsi-viewer
 
-A viewer for the waveform files (`.wav`) that the FNIRSI DPOX180H handheld
-oscilloscope saves. It runs on the desktop and in a web browser (WebAssembly).
+A viewer for the waveform files (`.wav`) that FNIRSI oscilloscopes save. It
+runs on the desktop and in a web browser (WebAssembly).
 
-The DPOX180H `.wav` file is **not** an audio file. It is a big-endian dump of
-the scope state: settings, a small screen thumbnail and the raw ADC samples.
+Supported models (found automatically from the file):
+
+| Model | File | Notes |
+|-------|------|-------|
+| DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes |
+| 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
+
+These `.wav` files are **not** audio files. Each model has its own binary
+format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
+2C23T and others) save other formats and are not supported.
 
 ## Use
 
@@ -57,9 +65,10 @@ this on each push to `main`.
 ## Tests
 
 Unit tests use synthetic files. The integration tests in `tests/real_samples.rs`
-use real DPOX180H files from
-[Rav263/fnirsi-wave-decoder](https://github.com/Rav263/fnirsi-wave-decoder).
-That repository has no license, so the files are not stored here. Download them
+use real files: DPOX180H files from
+[Rav263/fnirsi-wave-decoder](https://github.com/Rav263/fnirsi-wave-decoder)
+(no license) and 1013D files from lexus2026HA/FNIRSI-2C53T-Decoder
+(CC BY-NC 4.0). The files are not stored here. Download them
 first:
 
 ```bash
@@ -67,7 +76,7 @@ first:
 cargo test
 ```
 
-## File format
+## File format: DPOX180H
 
 All values are big-endian. Offsets are from the start of the file.
 
@@ -104,3 +113,31 @@ found by comparing real files with the screen of the scope.
   analysis; it is tested only with synthetic files).
 - The sample rate in real-time mode is verified only at 400 MS/s.
 - A ground marker far from the centre, and slow (roll) timebases.
+
+## File format: 1013D / 1014D
+
+15000 bytes, little-endian. Bytes 0–999 are the header; CH2 settings are at the
+CH1 offset + 10.
+
+| Byte | Field |
+|------|-------|
+| 2 / 12 | CH1 / CH2 shown (0 = off) |
+| 4 / 14 | V/div index: 5, 2.5, 1, 0.5, 0.2, 0.1, 0.05 V (times the probe) |
+| 8 / 18 | Coupling: 0 = DC, 1 = AC |
+| 10 / 20 | Probe: 10^n (1X, 10X, 100X) |
+| 22 | Time/div index 0..29: 50 s … 10 ns (1-2-5 steps) |
+| 26 / 28 / 30 | Trigger mode (Auto, Single, Normal) / edge (0 = rising) / source (0 = CH1) |
+| 84 / 86 | u16: buffer value of 0 V for CH1 / CH2 |
+| 1000 / 4000 | CH1 / CH2 buffer: 1500 × u16 |
+
+- Voltage = (value − zero) / 50 × V/div. Δt = time/div / 50.
+- The trigger is at the centre of the buffer (sample 750).
+- Sources: Robert Tidey
+  ([FNISR1013DScope](https://github.com/roberttidey/FNISR1013DScope)), W. Voigt
+  (zero level) and
+  [lexus2026HA/FNIRSI-2C53T-Decoder](https://github.com/lexus2026HA/FNIRSI-2C53T-Decoder)
+  (header bytes checked against screenshots). The tests use 21 real files from
+  that last repository (CC BY-NC 4.0, downloaded by `scripts/fetch-samples.sh`,
+  not stored here).
+- Other firmware (Peco, Atlan) writes another layout. Such files are rejected
+  with an error message.

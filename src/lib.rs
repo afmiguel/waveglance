@@ -1,7 +1,8 @@
-//! FNIRSI DPOX180H waveform viewer (desktop and WebAssembly).
+//! FNIRSI oscilloscope waveform viewer (DPOX180H, 1013D, 1014D) (desktop and WebAssembly).
 
 pub mod app;
 pub mod cursors;
+pub mod fnirsi1013d;
 pub mod measure;
 pub mod parser;
 

@@ -181,7 +181,7 @@ impl ScopeApp {
         {
             let _ = ctx;
             let picked = rfd::FileDialog::new()
-                .add_filter("DPOX180H waveform", &["wav", "WAV"])
+                .add_filter("FNIRSI waveform", &["wav", "WAV"])
                 .pick_file();
             if let Some(path) = picked {
                 let name = path
@@ -197,7 +197,7 @@ impl ScopeApp {
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let picked = rfd::AsyncFileDialog::new()
-                    .add_filter("DPOX180H waveform", &["wav", "WAV"])
+                    .add_filter("FNIRSI waveform", &["wav", "WAV"])
                     .pick_file()
                     .await;
                 if let Some(file) = picked {
@@ -211,11 +211,13 @@ impl ScopeApp {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(
-                RichText::new("FNIRSI DPOX180H")
-                    .strong()
-                    .color(Color32::LIGHT_GRAY),
-            );
+            // The model comes from the loaded file.
+            let title = match &self.waveform {
+                Some(w) => format!("FNIRSI {}", w.model.name()),
+                None => "FNIRSI Viewer".to_owned(),
+            };
+            ui.label(RichText::new(title).strong().color(Color32::LIGHT_GRAY))
+                .on_hover_text("Supported: DPOX180H, 1013D and 1014D (original firmware)");
             ui.separator();
             if ui.button("📂 Open file…").clicked() {
                 self.open_file_dialog(ui.ctx());
@@ -277,8 +279,14 @@ impl ScopeApp {
 
     /// On-screen display: the digital readouts of the scope.
     fn osd(&self, ui: &mut egui::Ui) {
+        // Probe factor and, if the file stores it, the input coupling.
         let probe = |ch: Option<&parser::Channel>| {
-            ch.map_or(String::new(), |c| format!(" {}X", c.probe_factor))
+            ch.map_or(String::new(), |c| {
+                let coupling = c
+                    .coupling
+                    .map_or(String::new(), |k| format!(" {}", k.name()));
+                format!(" {}X{coupling}", c.probe_factor)
+            })
         };
         let ch1_probe = probe(self.waveform.as_ref().and_then(|w| w.ch1.as_ref()));
         let ch2_probe = probe(self.waveform.as_ref().and_then(|w| w.ch2.as_ref()));
@@ -293,6 +301,15 @@ impl ScopeApp {
                 Acquisition::Equivalent { frames } => format!("ETS · frame 1 of {frames}"),
             };
             readout(ui, "MODE", Some(mode), Color32::LIGHT_GRAY);
+            if let Some(t) = &w.trigger {
+                let edge = if t.rising { "↑" } else { "↓" };
+                readout(
+                    ui,
+                    "TRIG",
+                    Some(format!("{} {edge} CH{}", t.mode, t.source)),
+                    TRIGGER_COLOR,
+                );
+            }
             readout(ui, "PTS", Some(w.samples_per_channel.to_string()), Color32::LIGHT_GRAY);
 
             let clipped: Vec<&str> = [("CH1", &w.ch1), ("CH2", &w.ch2)]
@@ -481,7 +498,7 @@ impl ScopeApp {
             let text = if hovering {
                 "Release to load the file"
             } else {
-                "Drop a DPOX180H .wav file here, or click \"Open file…\""
+                "Drop a FNIRSI .wav file here (DPOX180H, 1013D, 1014D), or click \"Open file…\""
             };
             ui.centered_and_justified(|ui| {
                 ui.label(RichText::new(text).size(18.0).color(Color32::GRAY))
