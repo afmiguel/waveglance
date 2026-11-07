@@ -11,6 +11,8 @@ the scope state: settings, a small screen thumbnail and the raw ADC samples.
 - Drop a `.wav` file on the window, or click **Open file…**.
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Drag: pan. Double-click: reset the view.
+- **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
+  the first and last instant shown. **Fit both**: Fit H, then Fit V.
 - The time axis has the trigger at t = 0. The voltage axis is in volts at the
   probe tip (the V/div that the scope shows already includes the probe setting).
 

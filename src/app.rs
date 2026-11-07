@@ -3,6 +3,7 @@
 use crate::parser::{self, Acquisition, Waveform};
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{HoverPosition, Legend, Line, LineStyle, Plot, PlotPoint, VLine};
+use std::ops::RangeInclusive;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 const CH1_COLOR: Color32 = Color32::from_rgb(255, 235, 0); // bright yellow
@@ -13,6 +14,18 @@ const GRID_COLOR: Color32 = Color32::from_rgb(90, 90, 90);
 
 /// A file read by the open dialog or by drag-and-drop: (name, bytes or error).
 type Loaded = (String, Result<Vec<u8>, String>);
+
+/// Automatic scaling of the plot view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    /// Show the full time span of the waveform. The voltage axis does not change.
+    Horizontal,
+    /// Scale the voltage axis to the samples between the first and last
+    /// instant shown now. The time axis does not change.
+    Vertical,
+    /// Horizontal fit, then vertical fit.
+    Both,
+}
 
 /// Application state.
 pub struct ScopeApp {
@@ -32,6 +45,8 @@ pub struct ScopeApp {
     error: Option<String>,
     /// Changes on each load, so that the plot resets its view.
     load_count: u64,
+    /// Fit requested by a button, applied on the next plot frame.
+    pending_fit: Option<Fit>,
     /// File reads finish here (they are asynchronous on the web).
     inbox_tx: Sender<Loaded>,
     inbox_rx: Receiver<Loaded>,
@@ -55,6 +70,7 @@ impl ScopeApp {
             waveform: None,
             error: None,
             load_count: 0,
+            pending_fit: None,
             inbox_tx,
             inbox_rx,
         }
@@ -167,6 +183,28 @@ impl ScopeApp {
             if ui.button("📂 Open file…").clicked() {
                 self.open_file_dialog(ui.ctx());
             }
+            let loaded = self.waveform.is_some();
+            for (label, fit, tip) in [
+                ("↔ Fit H", Fit::Horizontal, "Show the full time span"),
+                (
+                    "↕ Fit V",
+                    Fit::Vertical,
+                    "Fit the voltage axis to the samples between the first and last instant shown",
+                ),
+                (
+                    "⛶ Fit both",
+                    Fit::Both,
+                    "Full time span, then fit the voltage axis",
+                ),
+            ] {
+                if ui
+                    .add_enabled(loaded, egui::Button::new(label))
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    self.pending_fit = Some(fit);
+                }
+            }
             if let Some(name) = &self.file_name {
                 ui.label(RichText::new(name).monospace());
             }
@@ -217,7 +255,7 @@ impl ScopeApp {
         });
     }
 
-    fn scope_screen(&self, ui: &mut egui::Ui) {
+    fn scope_screen(&mut self, ui: &mut egui::Ui) {
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         if self.waveform.is_none() || hovering {
             let text = if hovering {
@@ -231,6 +269,7 @@ impl ScopeApp {
             return;
         }
 
+        let fit = self.pending_fit.take();
         Plot::new(("scope", self.load_count))
             .show_grid(true)
             .grid_color(GRID_COLOR)
@@ -275,6 +314,24 @@ impl ScopeApp {
                         plot.zoom_bounds_around_hovered(factor);
                     }
                 }
+                if let Some(fit) = fit {
+                    let channels = [
+                        self.channel_1_data.as_slice(),
+                        self.channel_2_data.as_slice(),
+                    ];
+                    let mut time = plot.plot_bounds().range_x();
+                    if matches!(fit, Fit::Horizontal | Fit::Both)
+                        && let Some(full) = time_span(&channels)
+                    {
+                        time = full.clone();
+                        plot.set_plot_bounds_x(full);
+                    }
+                    if matches!(fit, Fit::Vertical | Fit::Both)
+                        && let Some(volts) = voltage_span_in(&channels, &time)
+                    {
+                        plot.set_plot_bounds_y(volts);
+                    }
+                }
                 plot.vline(
                     VLine::new("Trigger", 0.0)
                         .color(TRIGGER_COLOR)
@@ -310,6 +367,42 @@ impl eframe::App for ScopeApp {
             .frame(egui::Frame::central_panel(ui.style()).fill(Color32::BLACK))
             .show(ui, |ui| self.scope_screen(ui));
     }
+}
+
+/// Time span of all the channels.
+pub fn time_span(channels: &[&[[f64; 2]]]) -> Option<RangeInclusive<f64>> {
+    let (lo, hi) = channels
+        .iter()
+        .flat_map(|c| c.iter())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p[0]), hi.max(p[0]))
+        });
+    (lo < hi).then_some(lo..=hi)
+}
+
+/// Voltage range of the samples with a time inside `time`, plus a 5% margin.
+/// `None` if no sample is in that window.
+pub fn voltage_span_in(
+    channels: &[&[[f64; 2]]],
+    time: &RangeInclusive<f64>,
+) -> Option<RangeInclusive<f64>> {
+    let (lo, hi) = channels
+        .iter()
+        .flat_map(|c| c.iter())
+        .filter(|p| time.contains(&p[0]))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p[1]), hi.max(p[1]))
+        });
+    if lo > hi {
+        return None;
+    }
+    // A flat signal still gets a visible range.
+    let margin = if hi > lo {
+        (hi - lo) * 0.05
+    } else {
+        lo.abs().max(1e-3) * 0.1
+    };
+    Some(lo - margin..=hi + margin)
 }
 
 /// One OSD readout: a coloured label and its value.
@@ -364,7 +457,29 @@ pub fn si_bare(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::si;
+    use super::{si, time_span, voltage_span_in};
+
+    #[test]
+    fn fit_vertical_uses_only_the_visible_time_window() {
+        // CH1: a 10 V spike at t = 5, small values elsewhere. CH2: -1 V at t = 1.
+        let ch1 = [[0.0, 0.1], [1.0, 0.2], [2.0, 0.3], [5.0, 10.0]];
+        let ch2 = [[1.0, -1.0], [6.0, -5.0]];
+        let chans = [&ch1[..], &ch2[..]];
+        assert_eq!(time_span(&chans), Some(0.0..=6.0));
+        // Window 0..2 excludes the spike and the -5 V sample.
+        let r = voltage_span_in(&chans, &(0.0..=2.0)).unwrap();
+        let (lo, hi) = (*r.start(), *r.end());
+        assert!(
+            (lo - (-1.0 - 0.065)).abs() < 1e-12 && (hi - (0.3 + 0.065)).abs() < 1e-12,
+            "{r:?}"
+        );
+        // No samples in the window: no change.
+        assert_eq!(voltage_span_in(&chans, &(10.0..=11.0)), None);
+        // Flat signal: still a non-empty range.
+        let flat = [[0.0, 0.5], [1.0, 0.5]];
+        let r = voltage_span_in(&[&flat[..]], &(0.0..=1.0)).unwrap();
+        assert!(r.start() < &0.5 && r.end() > &0.5);
+    }
 
     #[test]
     fn si_prefixes() {
