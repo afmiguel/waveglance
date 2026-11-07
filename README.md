@@ -44,6 +44,11 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
   dashed cursor line to move it.
   Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
   (linear interpolation). Voltage cursors show V1, V2 and ΔV.
+- **Σ Math ▾**: CH1 + CH2, CH1 − CH2 or CH2 − CH1, measured like a channel.
+- **⌕ Search ▾**: find rising edges, falling edges or glitches in the whole
+  record; [ and ] go to the previous and next one.
+- **▤ Measure → Statistics per cycle**: mean, min, max, σ and n of the time
+  measurements, in a floating window.
 - **∿ FFT ▾** menu: spectrum of CH1 or CH2 under the plot, of the samples
   shown in the time plot (zoom in to analyse a part). Windows Rectangular,
   Hanning, Hamming, Blackman-Harris and Flat top; scale dBV or V RMS; peak

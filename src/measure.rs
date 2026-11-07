@@ -151,6 +151,8 @@ pub struct Settings {
     /// Measure CH1, CH2.
     pub channels: [bool; 2],
     pub window: Window,
+    /// Show statistics over the cycles in the window (mean, min, max, σ, n).
+    pub stats: bool,
 }
 
 impl Default for Settings {
@@ -159,6 +161,7 @@ impl Default for Settings {
             selected: vec![Measurement::Frequency, Measurement::Vpp],
             channels: [true, true],
             window: Window::Screen,
+            stats: false,
         }
     }
 }
@@ -205,9 +208,69 @@ pub struct Results {
     pub fall: Option<f64>,
     pub pos_width: Option<f64>,
     pub neg_width: Option<f64>,
+    /// The value of each cycle (or edge) in the window, for statistics.
+    pub cycles: Cycles,
+}
+
+/// Values of each cycle in the window: periods, widths, rise and fall times
+/// and duty cycles (%), after the glitch filter.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Cycles {
+    pub periods: Vec<f64>,
+    pub rises: Vec<f64>,
+    pub falls: Vec<f64>,
+    pub pos_widths: Vec<f64>,
+    pub neg_widths: Vec<f64>,
+    pub duties: Vec<f64>,
+}
+
+/// Statistics of a list of values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stats {
+    pub mean: f64,
+    pub min: f64,
+    pub max: f64,
+    /// Standard deviation.
+    pub std_dev: f64,
+    pub count: usize,
+}
+
+impl Stats {
+    /// `None` for an empty list.
+    pub fn of(values: &[f64]) -> Option<Self> {
+        if values.is_empty() {
+            return None;
+        }
+        let n = values.len() as f64;
+        let mean = values.iter().sum::<f64>() / n;
+        let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+        Some(Self {
+            mean,
+            min: values.iter().copied().fold(f64::INFINITY, f64::min),
+            max: values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            std_dev: var.sqrt(),
+            count: values.len(),
+        })
+    }
 }
 
 impl Results {
+    /// The value of measurement `m` in each cycle, for the time
+    /// measurements. `None` for the voltage measurements (one value per window).
+    pub fn per_cycle(&self, m: Measurement) -> Option<Vec<f64>> {
+        let c = &self.cycles;
+        Some(match m {
+            Measurement::Period => c.periods.clone(),
+            Measurement::Frequency => c.periods.iter().map(|p| 1.0 / p).collect(),
+            Measurement::RiseTime => c.rises.clone(),
+            Measurement::FallTime => c.falls.clone(),
+            Measurement::PositiveWidth => c.pos_widths.clone(),
+            Measurement::NegativeWidth => c.neg_widths.clone(),
+            Measurement::DutyCycle => c.duties.clone(),
+            _ => return None,
+        })
+    }
+
     /// Value of one measurement, `None` if it cannot be measured
     /// (for example the frequency of a signal with fewer than two edges).
     pub fn get(&self, m: Measurement) -> Option<f64> {
@@ -308,26 +371,108 @@ pub fn measure(points: &[[f64; 2]], window: &RangeInclusive<f64>, min_amplitude:
     };
     r.pos_width = width(true);
     r.neg_width = width(false);
+
+    // Each cycle: from a rising edge to the next rising edge.
+    let mut cycles = Cycles {
+        rises: durations(true),
+        falls: durations(false),
+        ..Cycles::default()
+    };
+    for p in edges.windows(2) {
+        let w = p[1].t_mid - p[0].t_mid;
+        if p[0].rising {
+            cycles.pos_widths.push(w);
+        } else {
+            cycles.neg_widths.push(w);
+        }
+    }
+    for p in edges.windows(3).filter(|p| p[0].rising) {
+        let period = p[2].t_mid - p[0].t_mid;
+        if period > 0.0 {
+            cycles.periods.push(period);
+            cycles
+                .duties
+                .push((p[1].t_mid - p[0].t_mid) / period * 100.0);
+        }
+    }
+    r.cycles = cycles;
     r
+}
+
+/// What [`find_events`] looks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EventKind {
+    Rising,
+    Falling,
+    /// A pulse much shorter than the others (two edges closer than 10% of
+    /// the typical time between edges).
+    Glitch,
+}
+
+impl EventKind {
+    pub const ALL: [Self; 3] = [Self::Rising, Self::Falling, Self::Glitch];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rising => "Rising edges",
+            Self::Falling => "Falling edges",
+            Self::Glitch => "Glitches",
+        }
+    }
+}
+
+/// Times of the events of `kind` in the whole record, in time order. Edges
+/// use the 50% level and the same hysteresis as the measurements. A signal
+/// with an amplitude below `min_amplitude` has no events.
+pub fn find_events(points: &[[f64; 2]], kind: EventKind, min_amplitude: f64) -> Vec<f64> {
+    if points.len() < 2 {
+        return Vec::new();
+    }
+    let (vmin, vmax) = points
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p[1]), hi.max(p[1]))
+        });
+    let (vbase, vtop) = top_and_base(points, vmin, vmax);
+    if vtop - vbase < min_amplitude || vtop <= vbase {
+        return Vec::new();
+    }
+    let (edges, glitches) = split_glitches(find_edges(points, vbase, vtop));
+    match kind {
+        EventKind::Rising => edges.iter().filter(|e| e.rising).map(|e| e.t_mid).collect(),
+        EventKind::Falling => edges
+            .iter()
+            .filter(|e| !e.rising)
+            .map(|e| e.t_mid)
+            .collect(),
+        EventKind::Glitch => glitches,
+    }
 }
 
 /// Remove glitches: two edges closer than 10% of the median time between
 /// edges are a short spike, not a real pulse.
-fn remove_glitches(mut edges: Vec<Edge>) -> Vec<Edge> {
+fn remove_glitches(edges: Vec<Edge>) -> Vec<Edge> {
+    split_glitches(edges).0
+}
+
+/// The edges without the glitches, and the time of each glitch (its first edge).
+fn split_glitches(mut edges: Vec<Edge>) -> (Vec<Edge>, Vec<f64>) {
+    let mut glitches = Vec::new();
     let mut gaps: Vec<f64> = edges.windows(2).map(|p| p[1].t_mid - p[0].t_mid).collect();
     gaps.sort_by(f64::total_cmp);
     let Some(&median) = gaps.get(gaps.len() / 2) else {
-        return edges;
+        return (edges, glitches);
     };
     let mut i = 0;
     while i + 1 < edges.len() {
         if edges[i + 1].t_mid - edges[i].t_mid < 0.1 * median {
+            glitches.push(edges[i].t_mid);
             edges.drain(i..i + 2);
         } else {
             i += 1;
         }
     }
-    edges
+    (edges, glitches)
 }
 
 /// Mean of the values within `tolerance` (a fraction) of the median.
@@ -500,6 +645,37 @@ mod tests {
         let r = measure(&pts, &(0.0..=40.0), 0.01);
         assert!(close(r.get(Measurement::Period), 10.0, 0.01), "{r:?}");
         assert!(close(r.get(Measurement::PositiveWidth), 3.0, 0.02), "{r:?}");
+    }
+
+    #[test]
+    fn statistics_per_cycle() {
+        let r = measure(&square(), &(0.0..=40.0), 0.01);
+        let s = Stats::of(&r.per_cycle(Measurement::Period).unwrap()).unwrap();
+        assert_eq!(s.count, 3, "4 rising edges: 3 whole cycles");
+        assert!((s.mean - 10.0).abs() < 0.01 && s.std_dev < 0.01, "{s:?}");
+        let d = Stats::of(&r.per_cycle(Measurement::DutyCycle).unwrap()).unwrap();
+        assert!((d.mean - 30.0).abs() < 0.3, "{d:?}");
+        assert_eq!(r.per_cycle(Measurement::Vpp), None);
+        let s = Stats::of(&[1.0, 3.0]).unwrap();
+        assert_eq!((s.mean, s.min, s.max, s.std_dev), (2.0, 1.0, 3.0, 1.0));
+    }
+
+    #[test]
+    fn events_and_glitches() {
+        let mut pts = square();
+        for p in pts.iter_mut().filter(|p| (p[0] - 11.5).abs() < 0.015) {
+            p[1] = 0.0;
+        }
+        let rising = find_events(&pts, EventKind::Rising, 0.01);
+        assert_eq!(rising.len(), 4, "{rising:?}");
+        assert!((rising[1] - 10.25).abs() < 0.02);
+        let glitches = find_events(&pts, EventKind::Glitch, 0.01);
+        assert_eq!(glitches.len(), 1, "{glitches:?}");
+        assert!((glitches[0] - 11.5).abs() < 0.05);
+        assert!(
+            find_events(&pts, EventKind::Falling, 5.0).is_empty(),
+            "noise guard"
+        );
     }
 
     #[test]

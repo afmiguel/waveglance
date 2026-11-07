@@ -61,6 +61,11 @@ pub fn reference(channel: usize) -> Color32 {
     }
 }
 
+/// Math channel.
+pub fn math() -> Color32 {
+    pick(rgb(255, 120, 200), rgb(185, 0, 110))
+}
+
 /// Plot background.
 pub fn screen_bg() -> Color32 {
     pick(rgb(10, 10, 10), Color32::WHITE)
@@ -155,6 +160,7 @@ mod tests {
                 trigger(),
                 time_cursor(),
                 volt_cursor(),
+                math(),
                 warn(),
                 error(),
             ] {

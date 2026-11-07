@@ -8,6 +8,7 @@ use crate::parser::{self, Acquisition, Waveform};
 use crate::{examples, export};
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{HoverPosition, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
+use std::borrow::Cow;
 use std::ops::RangeInclusive;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -28,6 +29,8 @@ const MEASURE_KEY: &str = "measure";
 const HIDE_SPLASH_KEY: &str = "hide_splash";
 /// Storage key of the screen theme (white background).
 const LIGHT_THEME_KEY: &str = "light_theme";
+/// Storage key of the Math channel.
+const MATH_KEY: &str = "math";
 /// Storage key of the FFT settings.
 const FFT_KEY: &str = "fft";
 /// Part of the plot area used by the time plot when the FFT is shown.
@@ -64,6 +67,53 @@ type Loaded = (LoadTarget, String, Result<Vec<u8>, String>);
 /// A reference waveform line: (name, plot points, colour).
 type RefLine = (String, Vec<[f64; 2]>, Color32);
 
+/// Math channel: a sum or difference of CH1 and CH2, sample by sample.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum MathOp {
+    #[default]
+    Off,
+    Sum,
+    Diff,
+    DiffReverse,
+}
+
+impl MathOp {
+    pub const ALL: [Self; 4] = [Self::Off, Self::Sum, Self::Diff, Self::DiffReverse];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Sum => "CH1 + CH2",
+            Self::Diff => "CH1 − CH2",
+            Self::DiffReverse => "CH2 − CH1",
+        }
+    }
+
+    fn apply(self, a: f64, b: f64) -> f64 {
+        match self {
+            Self::Off => 0.0,
+            Self::Sum => a + b,
+            Self::Diff => a - b,
+            Self::DiffReverse => b - a,
+        }
+    }
+}
+
+/// Event search (Search menu): what to look for, in which channel, the
+/// times found and the event shown now.
+#[derive(Debug, Clone, Default)]
+struct Search {
+    kind: Option<measure::EventKind>,
+    /// 0 = CH1, 1 = CH2.
+    source: usize,
+    events: Vec<f64>,
+    current: Option<usize>,
+    /// What `events` was found from: (file, source, kind).
+    found_for: Option<(u64, usize, measure::EventKind)>,
+}
+
 /// What a screenshot is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShotPurpose {
@@ -82,8 +132,9 @@ struct ShotJob {
     frames_left: u8,
     /// The command was sent; waiting for the image.
     sent: bool,
-    /// Go back to the black screen after the screenshot.
-    restore_dark: bool,
+    /// The theme to go back to after the screenshot (true = white), if the
+    /// screenshot used the other one.
+    restore_light: Option<bool>,
 }
 
 /// Automatic scaling of the plot view.
@@ -233,6 +284,16 @@ pub struct ScopeApp {
     show_reference: bool,
     /// A screenshot in progress (Save screenshot, Print).
     shot: Option<ShotJob>,
+    /// The Print window (choice of white or black screen) is open.
+    print_dialog: bool,
+    /// Print on the white screen (the choice in the Print window).
+    print_white: bool,
+    /// Math channel operation (saved).
+    math: MathOp,
+    /// Show the Math channel trace.
+    math_visible: bool,
+    /// Event search.
+    search: Search,
     /// Screenshots arrive here (egui calls back after the frame is drawn).
     shot_tx: Sender<std::sync::Arc<egui::ColorImage>>,
     shot_rx: Receiver<std::sync::Arc<egui::ColorImage>>,
@@ -321,6 +382,14 @@ impl ScopeApp {
             reference: None,
             show_reference: true,
             shot: None,
+            print_dialog: false,
+            print_white: true,
+            math: cc
+                .storage
+                .and_then(|s| eframe::get_value(s, MATH_KEY))
+                .unwrap_or_default(),
+            math_visible: true,
+            search: Search::default(),
             shot_tx,
             shot_rx,
             visible: [true, true],
@@ -384,6 +453,183 @@ impl ScopeApp {
                 })
         };
         [map(&w.ch1, 0), map(&w.ch2, 1)]
+    }
+
+    /// The Math channel, computed sample by sample from CH1 and CH2 (both
+    /// must be on, with the same samples). Its V/div is the larger of the two.
+    pub fn math_channel(&self) -> Option<parser::Channel> {
+        if self.math == MathOp::Off {
+            return None;
+        }
+        let w = self.waveform.as_ref()?;
+        let (a, b) = (w.ch1.as_ref()?, w.ch2.as_ref()?);
+        if a.points.len() != b.points.len() {
+            return None;
+        }
+        let points = a
+            .points
+            .iter()
+            .zip(&b.points)
+            .map(|(p, q)| [p[0], self.math.apply(p[1], q[1])])
+            .collect();
+        let volts_per_div = a.volts_per_div.max(b.volts_per_div);
+        Some(parser::Channel {
+            volts_per_div,
+            probe_factor: 1.0,
+            ground_adc: 0.0,
+            // One code: the finer of the two channels.
+            counts_per_div: volts_per_div / a.lsb_volts().min(b.lsb_volts()),
+            center_code: 0.0,
+            code_max: u16::MAX,
+            coupling: None,
+            raw: Vec::new(),
+            points,
+            clipped: a.clipped || b.clipped,
+        })
+    }
+
+    /// Plot mapping of the Math channel (`None` if off or hidden).
+    fn math_map(&self, math: Option<&parser::Channel>) -> Option<YMap> {
+        let m = math.filter(|_| self.math_visible)?;
+        Some(match self.y_axis {
+            YAxis::Divisions => YMap {
+                scale: 1.0 / m.volts_per_div,
+                offset: 0.0,
+            },
+            YAxis::Volts => YMap::IDENTITY,
+        })
+    }
+
+    /// Contents of the Math menu.
+    fn math_menu(&mut self, ui: &mut egui::Ui) {
+        let both = self
+            .waveform
+            .as_ref()
+            .is_some_and(|w| w.ch1.is_some() && w.ch2.is_some());
+        for op in MathOp::ALL {
+            let enabled = op == MathOp::Off || both;
+            if ui
+                .add_enabled(enabled, egui::RadioButton::new(self.math == op, op.label()))
+                .on_disabled_hover_text("Needs CH1 and CH2 on in the file")
+                .clicked()
+            {
+                self.math = op;
+                self.math_visible = true;
+                ui.close();
+            }
+        }
+        ui.separator();
+        ui.label(
+            RichText::new("Sample by sample, in volts. Measured like a channel (MATH row).")
+                .small()
+                .color(palette::hint()),
+        );
+    }
+
+    /// Contents of the Search menu.
+    fn search_menu(&mut self, ui: &mut egui::Ui) {
+        let present = self
+            .waveform
+            .as_ref()
+            .map_or([false, false], |w| [w.ch1.is_some(), w.ch2.is_some()]);
+        let mut kind = self.search.kind;
+        ui.radio_value(&mut kind, None, "Off");
+        for k in measure::EventKind::ALL {
+            ui.radio_value(&mut kind, Some(k), k.label()).on_hover_text(match k {
+                measure::EventKind::Glitch => {
+                    "Pulses much shorter than the others (shorter than 10% of the typical time between edges)"
+                }
+                _ => "At the 50% level between Vbase and Vtop, with hysteresis (10%–90%)",
+            });
+        }
+        if kind != self.search.kind {
+            self.search.kind = kind;
+            self.search.current = None;
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("In:");
+            for (i, (name, color)) in [("CH1", palette::ch1()), ("CH2", palette::ch2())]
+                .into_iter()
+                .enumerate()
+            {
+                if ui
+                    .add_enabled(
+                        present[i],
+                        egui::RadioButton::new(
+                            self.search.source == i,
+                            RichText::new(name).color(color),
+                        ),
+                    )
+                    .clicked()
+                {
+                    self.search.source = i;
+                    self.search.current = None;
+                }
+            }
+        });
+        if self.search.kind.is_some() {
+            ui.separator();
+            ui.label(format!(
+                "{} found in the whole record",
+                self.search.events.len()
+            ));
+            ui.horizontal(|ui| {
+                if ui.button("◀ Previous").on_hover_text("Key [").clicked() {
+                    self.search_step(-1);
+                }
+                if ui.button("Next ▶").on_hover_text("Key ]").clicked() {
+                    self.search_step(1);
+                }
+            });
+        }
+    }
+
+    /// Find the events again when the file, channel or kind changed.
+    fn update_search(&mut self) {
+        let Some(kind) = self.search.kind else {
+            self.search.events.clear();
+            self.search.found_for = None;
+            return;
+        };
+        let key = (self.load_count, self.search.source, kind);
+        if self.search.found_for == Some(key) {
+            return;
+        }
+        self.search.found_for = Some(key);
+        self.search.current = None;
+        self.search.events = self
+            .waveform
+            .as_ref()
+            .and_then(|w| [&w.ch1, &w.ch2][self.search.source].as_ref())
+            .map(|ch| measure::find_events(&ch.points, kind, MIN_AMPLITUDE_DIV * ch.volts_per_div))
+            .unwrap_or_default();
+    }
+
+    /// Go to the next (`step` = 1) or previous (−1) event and centre the view on it.
+    fn search_step(&mut self, step: i64) {
+        let n = self.search.events.len();
+        if n == 0 {
+            return;
+        }
+        let next = match self.search.current {
+            Some(i) => (i as i64 + step).rem_euclid(n as i64) as usize,
+            None => {
+                // The first event after (or before) the centre of the view.
+                let centre = self.last_transform.as_ref().map_or(0.0, |t| {
+                    let r = t.bounds().range_x();
+                    (r.start() + r.end()) / 2.0
+                });
+                let after = self.search.events.partition_point(|&t| t <= centre);
+                if step > 0 {
+                    after % n
+                } else {
+                    (after + n - 1) % n
+                }
+            }
+        };
+        self.search.current = Some(next);
+        self.pending_view = Some(ViewCommand::CenterX(self.search.events[next]));
     }
 
     /// The channel points in plot units: `[time_s, y]`.
@@ -698,16 +944,22 @@ impl ScopeApp {
 
     /// Start a screenshot (for a PNG file or for printing). Printing uses the
     /// white screen to save ink.
-    fn start_shot(&mut self, ctx: &egui::Context, purpose: ShotPurpose) {
-        let restore_dark = purpose == ShotPurpose::Print && !self.light_theme;
-        if restore_dark {
-            self.set_light_theme(ctx, true);
-        }
+    /// `light`: the theme for the picture (`None`: the theme in use). The
+    /// theme in use comes back after the picture.
+    fn start_shot(&mut self, ctx: &egui::Context, purpose: ShotPurpose, light: Option<bool>) {
+        let restore_light = match light {
+            Some(l) if l != self.light_theme => {
+                let before = self.light_theme;
+                self.set_light_theme(ctx, l);
+                Some(before)
+            }
+            _ => None,
+        };
         self.shot = Some(ShotJob {
             purpose,
             frames_left: 3,
             sent: false,
-            restore_dark,
+            restore_light,
         });
         ctx.request_repaint();
     }
@@ -736,8 +988,8 @@ impl ScopeApp {
             return;
         };
         self.shot = None;
-        if job.restore_dark {
-            self.set_light_theme(ctx, false);
+        if let Some(light) = job.restore_light {
+            self.set_light_theme(ctx, light);
         }
         let base = self
             .file_name
@@ -755,6 +1007,64 @@ impl ScopeApp {
         });
         if let Err(e) = result {
             self.error = Some(format!("Could not save or print the picture: {e}."));
+        }
+    }
+
+    /// The Print window: white (recommended) or black screen, then print.
+    fn print_window(&mut self, ctx: &egui::Context) {
+        if !self.print_dialog {
+            return;
+        }
+        let mut go = false;
+        let modal = egui::Modal::new(egui::Id::unique("print_dialog")).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.heading("Print");
+            ui.add_space(4.0);
+            ui.radio_value(
+                &mut self.print_white,
+                true,
+                "White background (recommended)",
+            );
+            ui.label(
+                RichText::new(
+                    "Uses much less ink or toner, and the traces use darker colours that \
+                     stay easy to read on paper.",
+                )
+                .small()
+                .color(palette::hint()),
+            );
+            ui.add_space(4.0);
+            ui.radio_value(&mut self.print_white, false, "Black background");
+            ui.label(
+                RichText::new(
+                    "Like the scope screen. Prints a lot of black: much more ink or toner.",
+                )
+                .small()
+                .color(palette::hint()),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("The screen changes only for the picture; it comes back by itself.")
+                    .small()
+                    .color(palette::hint()),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Print…").clicked() {
+                    go = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    self.print_dialog = false;
+                }
+            });
+        });
+        if modal.should_close() {
+            self.print_dialog = false;
+        }
+        if go {
+            self.print_dialog = false;
+            let light = self.print_white;
+            self.start_shot(ctx, ShotPurpose::Print, Some(light));
         }
     }
 
@@ -826,7 +1136,7 @@ impl ScopeApp {
             .clicked()
         {
             ui.close();
-            self.start_shot(ui.ctx(), ShotPurpose::Save);
+            self.start_shot(ui.ctx(), ShotPurpose::Save, None);
         }
         if ui
             .add_enabled(loaded, egui::Button::new("Print…"))
@@ -834,12 +1144,15 @@ impl ScopeApp {
             .clicked()
         {
             ui.close();
-            self.start_shot(ui.ctx(), ShotPurpose::Print);
+            self.print_dialog = true;
         }
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
+            // Button text never wraps: a button that does not fit moves to the
+            // next row as a whole.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             // The model comes from the loaded file.
             let title = match &self.waveform {
                 Some(w) => format!("FNIRSI {}", w.model.name()),
@@ -855,73 +1168,122 @@ impl ScopeApp {
             )
             .on_hover_text(format!("fnirsi-viewer {VERSION}, commit {GIT_HASH}"));
             ui.add_space(8.0);
-            ui.menu_button("⏏ File ▾", |ui| self.file_menu(ui))
-                .response
-                .on_hover_text("Open, examples, reference, export, print");
+            ui.menu_button("⏏ File ▾", |ui| {
+                ui.style_mut().wrap_mode = None;
+                self.file_menu(ui);
+            })
+            .response
+            .on_hover_text("Open, examples, reference, export, print");
             let loaded = self.waveform.is_some();
             // All the options are menu buttons with ▾, so the bar is the same
-            // on a wide and on a narrow (phone) screen.
+            // on a wide and on a narrow (phone) screen. Each one is a single
+            // widget (no enabled/disabled group around it), so that a button
+            // that does not fit moves to the next row.
+            let stay_open = || {
+                Some(
+                    egui::containers::menu::MenuConfig::new()
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                )
+            };
             ui.add_space(8.0);
-            ui.add_enabled_ui(loaded, |ui| {
-                ui.menu_button("⛶ Fit ▾", |ui| self.fit_buttons(ui))
-                    .response
-                    .on_hover_text("Fit the view to the waveform");
-            });
+            toolbar_menu(
+                ui,
+                loaded,
+                "⛶ Fit ▾".to_owned(),
+                "Fit the view to the waveform",
+                None,
+                |ui| self.fit_buttons(ui),
+            );
             ui.add_space(8.0);
             let y_label = match self.y_axis {
                 YAxis::Volts => "Y: Volts ▾",
                 YAxis::Divisions => "Y: Div ▾",
             };
-            ui.menu_button(y_label, |ui| self.y_axis_buttons(ui))
-                .response
-                .on_hover_text("Vertical axis: volts, or divisions like the scope screen");
+            toolbar_menu(
+                ui,
+                true,
+                y_label.to_owned(),
+                "Vertical axis: volts, or divisions like the scope screen",
+                None,
+                |ui| self.y_axis_buttons(ui),
+            );
             ui.add_space(8.0);
-            ui.add_enabled_ui(loaded, |ui| {
-                if ui
-                    .selectable_label(self.zoom_view, "⊕ Zoom")
-                    .on_hover_text(
-                        "Zoom view: an overview of the whole record above the plot. \
-                         Click or drag in it to move, wheel to zoom.",
-                    )
-                    .clicked()
-                {
-                    self.zoom_view = !self.zoom_view;
-                }
-            });
+            if ui
+                .add_enabled(loaded, egui::Button::selectable(self.zoom_view, "⊕ Zoom"))
+                .on_hover_text(
+                    "Zoom view: an overview of the whole record above the plot. \
+                     Click or drag in it to move, wheel to zoom.",
+                )
+                .clicked()
+            {
+                self.zoom_view = !self.zoom_view;
+            }
             ui.add_space(8.0);
-            ui.add_enabled_ui(loaded, |ui| {
-                let label = if self.fft.show {
-                    format!("∿ FFT: CH{} ▾", self.fft_source().map_or(1, |i| i + 1))
-                } else {
-                    "∿ FFT ▾".to_owned()
-                };
-                let config = egui::containers::menu::MenuConfig::new()
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-                let (button, _) = egui::containers::menu::MenuButton::new(label)
-                    .config(config)
-                    .ui(ui, |ui| self.fft_menu(ui));
-                button.on_hover_text("Spectrum of a channel (FFT) under the plot");
-            });
+            let fft_label = if self.fft.show {
+                format!("∿ FFT: CH{} ▾", self.fft_source().map_or(1, |i| i + 1))
+            } else {
+                "∿ FFT ▾".to_owned()
+            };
+            toolbar_menu(
+                ui,
+                loaded,
+                fft_label,
+                "Spectrum of a channel (FFT) under the plot",
+                stay_open(),
+                |ui| self.fft_menu(ui),
+            );
             ui.add_space(8.0);
             // Cursor menu: the button shows the mode in use.
-            ui.add_enabled_ui(loaded, |ui| {
-                let label = match self.cursors.mode {
-                    CursorMode::Off => "⌖ Cursors ▾".to_owned(),
-                    m => format!("⌖ Cursors: {} ▾", cursor_mode_name(m)),
-                };
-                ui.menu_button(label, |ui| self.cursor_menu(ui))
-                    .response
-                    .on_hover_text("Measurement cursors");
-            });
+            let cursor_label = match self.cursors.mode {
+                CursorMode::Off => "⌖ Cursors ▾".to_owned(),
+                m => format!("⌖ Cursors: {} ▾", cursor_mode_name(m)),
+            };
+            toolbar_menu(
+                ui,
+                loaded,
+                cursor_label,
+                "Measurement cursors",
+                None,
+                |ui| self.cursor_menu(ui),
+            );
             ui.add_space(8.0);
             // Always enabled: the choice can be made before a file is loaded.
             // Stay open while items are ticked; close on a click outside the menu.
-            let config = egui::containers::menu::MenuConfig::new()
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-            let (button, _) = egui::containers::menu::MenuButton::new("▤ Measure ▾")
-                .config(config)
-                .ui(ui, |ui| self.measure_menu(ui));
-            button.on_hover_text("Choose the automatic measurements to show");
+            toolbar_menu(
+                ui,
+                true,
+                "▤ Measure ▾".to_owned(),
+                "Choose the automatic measurements to show",
+                stay_open(),
+                |ui| self.measure_menu(ui),
+            );
+            ui.add_space(8.0);
+            let math_label = if self.math == MathOp::Off {
+                "Σ Math ▾".to_owned()
+            } else {
+                format!("Σ Math: {} ▾", self.math.label())
+            };
+            toolbar_menu(
+                ui,
+                loaded,
+                math_label,
+                "A channel computed from CH1 and CH2",
+                None,
+                |ui| self.math_menu(ui),
+            );
+            ui.add_space(8.0);
+            let search_label = match self.search.kind {
+                Some(k) => format!("⌕ Search: {} ▾", k.label()),
+                None => "⌕ Search ▾".to_owned(),
+            };
+            toolbar_menu(
+                ui,
+                loaded,
+                search_label,
+                "Find edges or glitches in the whole record",
+                stay_open(),
+                |ui| self.search_menu(ui),
+            );
             ui.add_space(8.0);
             let (theme_label, theme_tip) = if self.light_theme {
                 ("◐ Black", "Black screen, like the scope")
@@ -1053,6 +1415,24 @@ impl ScopeApp {
                 );
             }
             readout(ui, "PTS", Some(w.samples_per_channel.to_string()), palette::fg_dim());
+            // Math channel: a click hides or shows it.
+            if let Some(m) = self.math_channel() {
+                let text = format!("{} {}/div", self.math.label(), si(m.volts_per_div, "V"));
+                if channel_button(ui, "MATH", &text, palette::math(), self.math_visible).clicked() {
+                    self.math_visible = !self.math_visible;
+                }
+            }
+            if let Some(kind) = self.search.kind {
+                let n = self.search.events.len();
+                let at = self.search.current.map_or("–".to_owned(), |i| (i + 1).to_string());
+                readout(
+                    ui,
+                    "SEARCH",
+                    Some(format!("{} CH{} {at}/{n}", kind.label(), self.search.source + 1)),
+                    palette::fg_dim(),
+                )
+                .on_hover_text("Search menu: [ and ] go to the previous and next event");
+            }
             // Reference: a click hides or shows it, like a channel.
             if let Some((name, _)) = &self.reference {
                 let text = format!("REF {name}");
@@ -1113,6 +1493,10 @@ impl ScopeApp {
                 .on_disabled_hover_text(format!("{name} is off in this file"));
             }
         });
+        ui.checkbox(&mut m.stats, "Statistics per cycle")
+            .on_hover_text(
+                "A window with mean, min, max, σ and number of cycles of the time measurements",
+            );
         ui.horizontal(|ui| {
             ui.label("Samples:");
             for w in measure::Window::ALL {
@@ -1180,12 +1564,14 @@ impl ScopeApp {
         })
     }
 
-    /// Automatic measurement readouts, one row per channel.
-    fn measure_readout(&self, ui: &mut egui::Ui) {
-        let Some((window, window_name)) = self.measure_window() else {
-            return;
-        };
-        let Some(w) = &self.waveform else { return };
+    /// The channels to measure: (name, channel, colour, clipped in the
+    /// window). CH1/CH2 when on, shown and ticked; MATH when on and shown.
+    fn measured_channels(
+        &self,
+        window: &RangeInclusive<f64>,
+    ) -> Vec<(&'static str, Cow<'_, parser::Channel>, Color32, bool)> {
+        let mut rows = Vec::new();
+        let Some(w) = &self.waveform else { return rows };
         for (i, (name, ch, color)) in [
             ("CH1", &w.ch1, palette::ch1()),
             ("CH2", &w.ch2, palette::ch2()),
@@ -1194,11 +1580,28 @@ impl ScopeApp {
         .enumerate()
         {
             let Some(ch) = ch else { continue };
-            if !self.measure.channels[i] || !self.visible[i] {
-                continue;
+            if self.measure.channels[i] && self.visible[i] {
+                rows.push((name, Cow::Borrowed(ch), color, ch.clipped_in(window)));
             }
+        }
+        if let Some(m) = self.math_channel().filter(|_| self.math_visible) {
+            // Clipped if a source channel is clipped in the window.
+            let clipped = [&w.ch1, &w.ch2]
+                .iter()
+                .any(|c| c.as_ref().is_some_and(|c| c.clipped_in(window)));
+            rows.push(("MATH", Cow::Owned(m), palette::math(), clipped));
+        }
+        rows
+    }
+
+    /// Automatic measurement readouts, one row per channel.
+    fn measure_readout(&self, ui: &mut egui::Ui) {
+        let Some((window, window_name)) = self.measure_window() else {
+            return;
+        };
+        for (name, ch, color, clipped) in self.measured_channels(&window) {
+            let ch = ch.as_ref();
             let r = measure::measure(&ch.points, &window, MIN_AMPLITUDE_DIV * ch.volts_per_div);
-            let clipped = ch.clipped_in(&window);
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new(format!("{name} ({window_name})"))
@@ -1222,6 +1625,49 @@ impl ScopeApp {
         }
     }
 
+    /// The statistics window (Measure menu → Statistics per cycle): one table
+    /// per measured channel. A floating window, so that it never takes the
+    /// space of the plot.
+    fn stats_window(&mut self, ctx: &egui::Context) {
+        if !self.measure.stats || self.waveform.is_none() {
+            return;
+        }
+        let Some((window, window_name)) = self.measure_window() else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new("Statistics per cycle")
+            .open(&mut open)
+            .default_pos(ctx.content_rect().right_top() + egui::vec2(-470.0, 70.0))
+            .default_width(440.0)
+            .resizable(true)
+            .collapsible(true)
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Each cycle in the {window_name} window: mean, min, max, standard deviation σ and number n."
+                    ))
+                    .small()
+                    .color(palette::hint()),
+                );
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let mut any = false;
+                    for (name, ch, color, _) in self.measured_channels(&window) {
+                        let ch = ch.as_ref();
+                        let r = measure::measure(&ch.points, &window, MIN_AMPLITUDE_DIV * ch.volts_per_div);
+                        any |= stats_table(ui, name, &r, ch, color, &self.measure);
+                        ui.add_space(6.0);
+                    }
+                    if !any {
+                        ui.label("Tick a time measurement (Freq, Period, Rise, Fall, ±Width, Duty) in the Measure menu.");
+                    }
+                });
+            });
+        if !open {
+            self.measure.stats = false;
+        }
+    }
+
     /// Show the measurement panel?
     fn shows_measurements(&self) -> bool {
         let Some(w) = &self.waveform else {
@@ -1231,7 +1677,9 @@ impl ScopeApp {
             w.ch1.is_some() && self.visible[0],
             w.ch2.is_some() && self.visible[1],
         ];
-        !self.measure.selected.is_empty() && (0..2).any(|i| on[i] && self.measure.channels[i])
+        !self.measure.selected.is_empty()
+            && ((0..2).any(|i| on[i] && self.measure.channels[i])
+                || (self.math != MathOp::Off && self.math_visible))
     }
 
     /// Cursor readouts: positions, differences and channel values at T1/T2.
@@ -1374,7 +1822,7 @@ impl ScopeApp {
                 i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::P))
             })
         {
-            self.start_shot(ctx, ShotPurpose::Print);
+            self.print_dialog = true;
         }
         if self.waveform.is_none() {
             return;
@@ -1419,6 +1867,13 @@ impl ScopeApp {
         }
         if self.cursors.selected.is_some() && key(Modifiers::NONE, Key::Escape) {
             self.cursors.selected = None;
+        }
+        // [ and ]: previous and next search event.
+        if key(Modifiers::NONE, Key::OpenBracket) {
+            self.search_step(-1);
+        }
+        if key(Modifiers::NONE, Key::CloseBracket) {
+            self.search_step(1);
         }
         // + and −: zoom the time axis around the centre.
         if key(Modifiers::NONE, Key::Plus) || key(Modifiers::NONE, Key::Equals) {
@@ -1787,6 +2242,12 @@ impl ScopeApp {
         let maps = self.y_maps();
         let [data_1, data_2] = self.plot_data();
         let reference_lines = self.reference_lines();
+        let math = self.math_channel();
+        let math_map = self.math_map(math.as_ref());
+        let math_data: Vec<[f64; 2]> = match (&math, math_map) {
+            (Some(m), Some(map)) => m.points.iter().map(|p| [p[0], map.to_plot(p[1])]).collect(),
+            _ => Vec::new(),
+        };
         if self.zoom_view {
             self.overview(ui, [&data_1, &data_2]);
             ui.add_space(4.0);
@@ -1851,6 +2312,7 @@ impl ScopeApp {
                         let map = match *plot_name {
                             "CH1" => maps[0],
                             "CH2" => maps[1],
+                            "MATH" => math_map,
                             _ => None,
                         };
                         match map {
@@ -1970,6 +2432,13 @@ impl ScopeApp {
                 for (name, points, color) in reference_lines.into_iter().flatten() {
                     plot.line(Line::new(name, points).color(color).width(1.0));
                 }
+                if !math_data.is_empty() {
+                    plot.line(
+                        Line::new("MATH", math_data)
+                            .color(palette::math())
+                            .width(1.5),
+                    );
+                }
                 if !data_1.is_empty() {
                     plot.line(Line::new("CH1", data_1).color(palette::ch1()).width(1.5));
                 }
@@ -1980,6 +2449,14 @@ impl ScopeApp {
         self.cursors
             .update_pointer_icon(ui.ctx(), &response.transform);
         draw_trigger_marker(ui, &response.transform);
+        if self.search.kind.is_some() {
+            draw_search_marks(
+                ui,
+                &response.transform,
+                &self.search.events,
+                self.search.current,
+            );
+        }
         draw_ground_markers(ui, &response.transform, &maps);
         if on_plot {
             let pos = ui.ctx().input(|i| i.pointer.latest_pos());
@@ -2024,17 +2501,20 @@ impl eframe::App for ScopeApp {
         let ctx = ui.ctx().clone();
         palette::set_light(self.light_theme);
         self.update_shot(&ctx);
-        // No shortcuts while the welcome screen is open.
-        if !self.splash_open {
+        // No shortcuts while the welcome screen or the Print window is open.
+        if !self.splash_open && !self.print_dialog {
             self.handle_keys(&ctx);
         }
         self.handle_dropped_files(&ctx);
         self.receive_loaded_files();
+        self.update_search();
         // A file was dropped or opened: the splash screen is no longer needed.
         if self.waveform.is_some() && self.load_count == 1 && self.splash_open {
             self.splash_open = false;
         }
         self.splash(&ctx);
+        self.print_window(&ctx);
+        self.stats_window(&ctx);
         if self.help_open {
             self.help(&ctx);
         }
@@ -2092,6 +2572,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, HIDE_SPLASH_KEY, &self.hide_splash);
         eframe::set_value(storage, ZOOM_VIEW_KEY, &self.zoom_view);
         eframe::set_value(storage, FFT_KEY, &self.fft);
+        eframe::set_value(storage, MATH_KEY, &self.math);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
     }
 }
@@ -2303,7 +2784,7 @@ fn help_text(ui: &mut egui::Ui) {
             "Open reference…: a second file drawn faint behind the traces (grey for CH1, blue-grey for CH2), to compare before and after. Click the REF readout at the bottom to hide or show it.",
             "Export CSV…: all the samples as a table (time and the voltage of each channel), with the settings in # lines at the top.",
             "Save screenshot (PNG)…: a picture of the screen as shown.",
-            "Print… (Ctrl/⌘+P): prints a picture of the screen on a white background to save ink. On the desktop, the picture opens in the image viewer, where you can print it.",
+            "Print… (Ctrl/⌘+P): choose a white background (recommended: much less ink, darker colours made for paper) or black; the screen changes only for the picture. On the desktop, the picture opens in the image viewer, where you can print it.",
         ],
     );
     section(
@@ -2370,9 +2851,18 @@ fn help_text(ui: &mut egui::Ui) {
     );
     section(
         ui,
+        "Math and search",
+        &[
+            "Σ Math: CH1 + CH2, CH1 − CH2 or CH2 − CH1, sample by sample (needs both channels). The MATH trace is measured like a channel; click the MATH readout to hide it.",
+            "⌕ Search: rising edges, falling edges or glitches (very short pulses) in the whole record of CH1 or CH2. Marks on the bottom edge show them; Previous/Next (keys [ and ]) centre the view on each one.",
+            "Statistics per cycle (▤ Measure menu): mean, min, max, σ and number of cycles for the time measurements.",
+        ],
+    );
+    section(
+        ui,
         "Keyboard",
         &[
-            "Ctrl/⌘+O: open a file. Ctrl/⌘+P: print. F1: this help. B: black or white screen.",
+            "Ctrl/⌘+O: open a file. Ctrl/⌘+P: print. F1: this help. B: black or white screen. [ and ]: previous / next search result.",
             "F: fit both. H: fit time. V: fit vertical.",
             "Z: zoom view. S: spectrum (FFT). Y: volts or divisions. 1, 2: hide or show CH1, CH2.",
             "+ and −: zoom the time axis. Arrows: move the view (Shift: more).",
@@ -2413,6 +2903,32 @@ fn pointer_on_background(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.pointer.latest_pos())
         .and_then(|p| ctx.layer_id_at(p))
         .is_some_and(|layer| layer.order == egui::Order::Background)
+}
+
+/// A menu button of the toolbar, or the same button disabled.
+fn toolbar_menu(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    label: String,
+    tip: &str,
+    config: Option<egui::containers::menu::MenuConfig>,
+    contents: impl FnOnce(&mut egui::Ui),
+) {
+    if !enabled {
+        ui.add_enabled(false, egui::Button::new(label))
+            .on_disabled_hover_text(format!("{tip} (open a file first)"));
+        return;
+    }
+    let mut button = egui::containers::menu::MenuButton::new(label);
+    if let Some(config) = config {
+        button = button.config(config);
+    }
+    let (response, _) = button.ui(ui, |ui| {
+        // The toolbar does not wrap text; text in the menu does.
+        ui.style_mut().wrap_mode = None;
+        contents(ui);
+    });
+    response.on_hover_text(tip);
 }
 
 /// Name of a cursor mode, for the menu.
@@ -2505,6 +3021,107 @@ fn draw_ground_markers(ui: &egui::Ui, transform: &PlotTransform, maps: &[Option<
             font.clone(),
             Color32::BLACK,
         );
+    }
+}
+
+/// Statistics of the time measurements over the cycles in the window:
+/// mean, min, max, standard deviation and number of cycles.
+fn stats_table(
+    ui: &mut egui::Ui,
+    name: &str,
+    r: &measure::Results,
+    ch: &parser::Channel,
+    color: Color32,
+    settings: &measure::Settings,
+) -> bool {
+    let rows: Vec<(Measurement, measure::Stats)> = settings
+        .shown()
+        .filter_map(|m| Some((m, measure::Stats::of(&r.per_cycle(m)?)?)))
+        .collect();
+    if rows.is_empty() {
+        return false;
+    }
+    egui::Grid::new(("stats", name))
+        .striped(true)
+        .spacing([14.0, 2.0])
+        .show(ui, |ui| {
+            let head = |ui: &mut egui::Ui, t: &str| {
+                ui.label(RichText::new(t).small().color(palette::hint()));
+            };
+            head(ui, &format!("{name} per cycle"));
+            for t in ["mean", "min", "max", "σ", "n"] {
+                head(ui, t);
+            }
+            ui.end_row();
+            for (m, st) in rows {
+                let cell = |ui: &mut egui::Ui, text: String| {
+                    ui.label(RichText::new(text).monospace().color(color));
+                };
+                cell(ui, m.label().to_owned());
+                cell(ui, format_measurement(m, Some(st.mean), ch));
+                cell(ui, format_measurement(m, Some(st.min), ch));
+                cell(ui, format_measurement(m, Some(st.max), ch));
+                cell(ui, format_spread(m, st.std_dev, ch));
+                cell(ui, st.count.to_string());
+                ui.end_row();
+            }
+        });
+    true
+}
+
+/// A standard deviation in the unit of measurement `m` (no "<" limit).
+fn format_spread(m: Measurement, v: f64, ch: &parser::Channel) -> String {
+    let dt = ch.sample_interval().unwrap_or(0.0).abs();
+    match m.unit() {
+        Unit::Second => fmt_sig(v, "s", 3, dt / 10.0),
+        Unit::Hertz => fmt_sig(v, "Hz", 3, 0.0),
+        Unit::Percent => format!("{v:.2} %"),
+        Unit::Volt => fmt_sig(v, "V", 3, 0.0),
+    }
+}
+
+/// Search results: a small mark on the bottom edge of the plot at each event
+/// in view; the current event is larger, in the trigger colour.
+fn draw_search_marks(
+    ui: &egui::Ui,
+    transform: &PlotTransform,
+    events: &[f64],
+    current: Option<usize>,
+) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame.expand(1.0));
+    let range = transform.bounds().range_x();
+    let a = events.partition_point(|&t| t < *range.start());
+    let b = events.partition_point(|&t| t <= *range.end());
+    // Too many marks in view: draw at most 400.
+    let step = ((b - a) / 400).max(1);
+    let bottom = frame.bottom();
+    let mark = |x: f32, size: f32, color: Color32| {
+        egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(x - size, bottom),
+                egui::pos2(x + size, bottom),
+                egui::pos2(x, bottom - 1.6 * size),
+            ],
+            color,
+            egui::Stroke::NONE,
+        )
+    };
+    for i in (a..b).step_by(step) {
+        if Some(i) != current {
+            painter.add(mark(
+                transform.position_from_point_x(events[i]),
+                4.0,
+                palette::fg_dim(),
+            ));
+        }
+    }
+    if let Some(i) = current.filter(|&i| i >= a && i < b) {
+        painter.add(mark(
+            transform.position_from_point_x(events[i]),
+            7.0,
+            palette::trigger(),
+        ));
     }
 }
 

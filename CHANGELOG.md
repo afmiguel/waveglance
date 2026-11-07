@@ -5,6 +5,20 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.7.0 — 2026-11-07
+
+- **Σ Math ▾**: CH1 + CH2, CH1 − CH2 or CH2 − CH1, sample by sample. The
+  MATH trace is measured like a channel; click the MATH readout to hide it.
+- **⌕ Search ▾**: rising edges, falling edges or glitches in the whole record
+  of CH1 or CH2; marks on the bottom edge, Previous/Next (keys [ and ])
+  centre the view on each event.
+- Measure → **Statistics per cycle**: a floating window with mean, min, max,
+  σ and number of cycles of the time measurements.
+- **Print window**: white background (recommended, with the reason) or black;
+  the screen changes only for the picture and comes back by itself.
+- Toolbar: each button wraps to the next row as a whole (no button is cut
+  off at the right edge); menu text wraps normally.
+
 ## 0.6.0 — 2026-11-07
 
 - **⏏ File ▾** menu (was the Open file button): Open file…, Open example,
