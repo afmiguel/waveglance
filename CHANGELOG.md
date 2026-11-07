@@ -5,6 +5,26 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.6.0 — 2026-11-07
+
+- **⏏ File ▾** menu (was the Open file button): Open file…, Open example,
+  Open reference…, Export CSV…, Save screenshot (PNG)…, Print….
+- Open example: 7 real FNIRSI 1013D captures built into the app (by
+  lexus2026HA, CC BY-NC 4.0; see `assets/examples/1013d/README.md`).
+- Reference waveform: a second file drawn faint behind the traces, inside
+  the time span of the main file; the REF readout hides or shows it.
+- Export CSV: all samples (time and each channel's voltage) with the
+  settings in `#` lines. Desktop: save dialog; browser: download.
+- Save screenshot (PNG) and Print (Ctrl/⌘+P). Print uses the white screen;
+  in the browser it opens the print dialog with a picture of the screen
+  (eframe takes Ctrl/⌘+P from the browser, so the app handles it); on the
+  desktop the picture opens in the image viewer.
+- Favicon (SVG, with a PNG fallback).
+- Fix: the Help icon is a plain "?", visible on the white screen too.
+- Ground markers: a drag on 1▶ / 2▶ in Volts mode now switches to Div and
+  moves that channel (in Volts both channels share one axis, so before the
+  drag moved the whole plot). A tip on the marker explains it.
+
 ## 0.5.0 — 2026-11-07
 
 - White screen (◐ White / ◐ Black, key B) for printing, with darker trace,

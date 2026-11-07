@@ -53,6 +53,14 @@ pub fn volt_cursor() -> Color32 {
     pick(rgb(120, 255, 120), rgb(0, 125, 45))
 }
 
+/// Reference waveform of CH1 and CH2: faint, behind the traces.
+pub fn reference(channel: usize) -> Color32 {
+    match channel {
+        0 => pick(rgb(170, 170, 170), rgb(125, 125, 125)),
+        _ => pick(rgb(140, 150, 230), rgb(95, 105, 180)),
+    }
+}
+
 /// Plot background.
 pub fn screen_bg() -> Color32 {
     pick(rgb(10, 10, 10), Color32::WHITE)

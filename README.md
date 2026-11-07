@@ -16,12 +16,18 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 
 ## Use
 
-- Drop a `.wav` file on the window, or click **Open file…**.
+- Drop a `.wav` file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
+- **File ▾ → Open example**: real FNIRSI 1013D captures built into the app.
+- **File ▾ → Open reference…**: a second file drawn faint behind the traces,
+  to compare. The REF readout at the bottom hides or shows it.
+- **File ▾ → Export CSV…**, **Save screenshot (PNG)…**, **Print…** (Ctrl/⌘+P,
+  on a white screen).
 - **◐ White / ◐ Black**: white screen with darker colours, for printing.
 - Keyboard: Ctrl/⌘+O open, F1 help, F/H/V fit, Z zoom view, S FFT, Y volts/div,
   C cursors, Tab + arrows move a cursor, 1/2 hide a channel, +/− zoom, arrows pan.
-- In Div mode, drag a ground marker (1▶, 2▶) to move that channel.
-- The welcome screen lists all the controls. The **❔ Help** button has the main instructions.
+- Drag a ground marker (1▶, 2▶) to move that channel (this switches Y to Div,
+  where each channel has its own scale).
+- The welcome screen lists all the controls. The **? Help** button has the main instructions.
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Mouse wheel over a time or voltage axis: pan along that axis.
 - Drag: pan. Double-click: reset the view.
@@ -170,3 +176,12 @@ CH1 offset + 10.
   not stored here).
 - Other firmware (Peco, Atlan) writes another layout. Such files are rejected
   with an error message.
+
+## Example files
+
+The files in `assets/examples/1013d/` are FNIRSI 1013D captures by
+lexus2026HA, from
+[lexus2026HA/FNIRSI-2C53T-Decoder](https://github.com/lexus2026HA/FNIRSI-2C53T-Decoder),
+licensed [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). They
+are not changed. There are no DPOX180H examples: the only public DPOX180H files
+have no license.

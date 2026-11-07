@@ -4,14 +4,26 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <title>FNIRSI Viewer</title>
+    <link data-trunk rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link data-trunk rel="copy-file" href="assets/favicon.png" />
+    <link rel="alternate icon" href="favicon.png" type="image/png" />
     <!-- Trunk builds the crate (lib.rs, #[wasm_bindgen(start)]) into this page. -->
     <link data-trunk rel="rust" data-target-name="fnirsi_viewer" data-wasm-opt="z" />
     <style>
         html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a0a0a; }
         canvas { display: block; width: 100%; height: 100%; }
+        /* File > Print: the app puts a picture of the screen in #print_image
+           and adds the class "printing" to the body while the print dialog is open. */
+        #print_image { display: none; }
+        @media print {
+            html, body { height: auto; overflow: visible; background: #fff; }
+            body.printing #the_canvas_id { display: none !important; }
+            body.printing #print_image { display: block; width: 100%; height: auto; }
+        }
     </style>
 </head>
 <body>
     <canvas id="the_canvas_id"></canvas>
+    <img id="print_image" alt="FNIRSI Viewer screen" />
 </body>
 </html>

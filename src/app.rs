@@ -5,6 +5,7 @@ use crate::fft;
 use crate::measure::{self, Measurement, Unit};
 use crate::palette;
 use crate::parser::{self, Acquisition, Waveform};
+use crate::{examples, export};
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{HoverPosition, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
 use std::ops::RangeInclusive;
@@ -48,8 +49,42 @@ const SCREEN_DIVS_Y: f64 = 8.0;
 /// edges, period or widths are measured.
 const MIN_AMPLITUDE_DIV: f64 = 0.1;
 
-/// A file read by the open dialog or by drag-and-drop: (name, bytes or error).
-type Loaded = (String, Result<Vec<u8>, String>);
+/// Where a file read by a dialog or a drop goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoadTarget {
+    /// The waveform to show and measure.
+    Main,
+    /// The reference waveform, drawn faint for comparison.
+    Reference,
+}
+
+/// A file read by the open dialog or by drag-and-drop: (target, name, bytes or error).
+type Loaded = (LoadTarget, String, Result<Vec<u8>, String>);
+
+/// A reference waveform line: (name, plot points, colour).
+type RefLine = (String, Vec<[f64; 2]>, Color32);
+
+/// What a screenshot is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShotPurpose {
+    /// Save it as a PNG file.
+    Save,
+    /// Print it (with the white screen).
+    Print,
+}
+
+/// A screenshot waiting for its frame: menus close and the theme changes
+/// first, so the picture shows only the plots and readouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ShotJob {
+    purpose: ShotPurpose,
+    /// Frames to wait before the screenshot command.
+    frames_left: u8,
+    /// The command was sent; waiting for the image.
+    sent: bool,
+    /// Go back to the black screen after the screenshot.
+    restore_dark: bool,
+}
 
 /// Automatic scaling of the plot view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +227,15 @@ pub struct ScopeApp {
     ground_shift: [f64; 2],
     /// The ground marker that the pointer is dragging (0 = CH1, 1 = CH2).
     marker_drag: Option<usize>,
+    /// Reference waveform (file name, waveform), drawn faint behind the traces.
+    reference: Option<(String, Waveform)>,
+    /// Show the reference waveform.
+    show_reference: bool,
+    /// A screenshot in progress (Save screenshot, Print).
+    shot: Option<ShotJob>,
+    /// Screenshots arrive here (egui calls back after the frame is drawn).
+    shot_tx: Sender<std::sync::Arc<egui::ColorImage>>,
+    shot_rx: Receiver<std::sync::Arc<egui::ColorImage>>,
     /// Tab presses taken from egui while cursors are on (they select the
     /// next cursor instead of moving the keyboard focus between buttons).
     tab_presses: usize,
@@ -242,6 +286,7 @@ impl ScopeApp {
             .and_then(|s| eframe::get_value(s, HIDE_SPLASH_KEY))
             .unwrap_or(false);
         let (inbox_tx, inbox_rx) = channel();
+        let (shot_tx, shot_rx) = channel();
         Self {
             channel_1_data: Vec::new(),
             channel_2_data: Vec::new(),
@@ -273,6 +318,11 @@ impl ScopeApp {
             ground_shift: [0.0; 2],
             marker_drag: None,
             tab_presses: 0,
+            reference: None,
+            show_reference: true,
+            shot: None,
+            shot_tx,
+            shot_rx,
             visible: [true, true],
             last_transform: None,
             inbox_tx,
@@ -403,22 +453,23 @@ impl ScopeApp {
             return;
         }
         let mut open_file = false;
-        let modal = egui::Modal::new(egui::Id::unique("splash")).show(ctx, |ui| {
-            ui.set_max_width(460.0);
-            ui.heading("FNIRSI Viewer");
-            ui.label(
-                RichText::new(format!("Version {VERSION} · commit {GIT_HASH}"))
-                    .small()
-                    .color(palette::hint()),
-            );
-            ui.add_space(6.0);
-            ui.label(
-                "Opens the waveform files (.wav) that FNIRSI DPOX180H, 1013D and 1014D \
+        let modal =
+            egui::Modal::new(egui::Id::unique("splash")).show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.heading("FNIRSI Viewer");
+                ui.label(
+                    RichText::new(format!("Version {VERSION} · commit {GIT_HASH}"))
+                        .small()
+                        .color(palette::hint()),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    "Opens the waveform files (.wav) that FNIRSI DPOX180H, 1013D and 1014D \
                  oscilloscopes save. The files are read on this device: nothing is uploaded.",
-            );
-            ui.add_space(8.0);
-            ui.label(RichText::new("Controls").strong());
-            egui::Grid::new("splash_controls")
+                );
+                ui.add_space(8.0);
+                ui.label(RichText::new("Controls").strong());
+                egui::Grid::new("splash_controls")
                 .num_columns(2)
                 .spacing([16.0, 4.0])
                 .striped(true)
@@ -429,7 +480,7 @@ impl ScopeApp {
                         ("Drag", "Pan"),
                         ("Double-click", "Reset the view"),
                         ("Drag a dashed line", "Move a cursor (⌖ Cursors menu)"),
-                        ("Drag 1▶ / 2▶ (Div)", "Move that channel up or down"),
+                        ("Drag 1▶ / 2▶", "Move that channel up or down (switches Y to Div)"),
                         ("Click CH1 / CH2 readout", "Hide or show the channel"),
                         ("Touch", "Pinch: zoom · drag: pan · double-tap: reset"),
                         (
@@ -443,27 +494,27 @@ impl ScopeApp {
                         ui.end_row();
                     }
                 });
-            ui.add_space(8.0);
-            ui.checkbox(&mut self.hide_splash, "Don't show this at startup");
-            ui.label(
-                RichText::new("The Help button shows these controls and more.")
-                    .small()
-                    .color(palette::hint()),
-            );
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if ui.button("⏏ Open file…").clicked() {
-                    open_file = true;
-                }
-                if ui.button("❔ Help").clicked() {
-                    self.splash_open = false;
-                    self.help_open = true;
-                }
-                if ui.button("Close").clicked() {
-                    self.splash_open = false;
-                }
+                ui.add_space(8.0);
+                ui.checkbox(&mut self.hide_splash, "Don't show this at startup");
+                ui.label(
+                    RichText::new("The Help button shows these controls and more.")
+                        .small()
+                        .color(palette::hint()),
+                );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button("⏏ Open file…").clicked() {
+                        open_file = true;
+                    }
+                    if ui.button("? Help").clicked() {
+                        self.splash_open = false;
+                        self.help_open = true;
+                    }
+                    if ui.button("Close").clicked() {
+                        self.splash_open = false;
+                    }
+                });
             });
-        });
         if modal.should_close() {
             self.splash_open = false;
         }
@@ -509,10 +560,11 @@ impl ScopeApp {
     }
 
     fn receive_loaded_files(&mut self) {
-        while let Ok((name, result)) = self.inbox_rx.try_recv() {
-            match result {
-                Ok(bytes) => self.load_bytes(name, &bytes),
-                Err(e) => self.report_open_error(&name, &e),
+        while let Ok((target, name, result)) = self.inbox_rx.try_recv() {
+            match (target, result) {
+                (LoadTarget::Main, Ok(bytes)) => self.load_bytes(name, &bytes),
+                (LoadTarget::Reference, Ok(bytes)) => self.load_reference(name, &bytes),
+                (_, Err(e)) => self.report_open_error(&name, &e),
             }
         }
     }
@@ -532,7 +584,7 @@ impl ScopeApp {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let result = std::fs::read(file.path()).map_err(|e| e.to_string());
-            let _ = self.inbox_tx.send((name, result));
+            let _ = self.inbox_tx.send((LoadTarget::Main, name, result));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -540,14 +592,19 @@ impl ScopeApp {
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let result = file.bytes_async().await;
-                let _ = tx.send((name, result));
+                let _ = tx.send((LoadTarget::Main, name, result));
                 ctx.request_repaint();
             });
         }
     }
 
-    /// Show the "Open file" dialog (`rfd`).
+    /// Show the "Open file" dialog (`rfd`) for the main waveform.
     fn open_file_dialog(&mut self, ctx: &egui::Context) {
+        self.open_dialog(ctx, LoadTarget::Main);
+    }
+
+    /// Show the "Open file" dialog (`rfd`); the file goes to `target`.
+    fn open_dialog(&mut self, ctx: &egui::Context, target: LoadTarget) {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let _ = ctx;
@@ -559,7 +616,7 @@ impl ScopeApp {
                     .file_name()
                     .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                 let result = std::fs::read(&path).map_err(|e| e.to_string());
-                let _ = self.inbox_tx.send((name, result));
+                let _ = self.inbox_tx.send((target, name, result));
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -573,10 +630,211 @@ impl ScopeApp {
                     .await;
                 if let Some(file) = picked {
                     let bytes = file.read().await;
-                    let _ = tx.send((file.file_name(), Ok(bytes)));
+                    let _ = tx.send((target, file.file_name(), Ok(bytes)));
                     ctx.request_repaint();
                 }
             });
+        }
+    }
+
+    /// The reference waveform as plot lines (name, points, colour): mapped
+    /// like the main traces (Volts: the same axis; Div: its own V/div and
+    /// ground), and reduced for drawing.
+    fn reference_lines(&self) -> [Option<RefLine>; 2] {
+        let Some((_, w)) = self.reference.as_ref().filter(|_| self.show_reference) else {
+            return [None, None];
+        };
+        std::array::from_fn(|i| {
+            let ch = [&w.ch1, &w.ch2][i].as_ref()?;
+            let map = match self.y_axis {
+                YAxis::Divisions => YMap::divisions(ch),
+                YAxis::Volts => YMap::IDENTITY,
+            };
+            // Only inside the time span of the main file, so that the
+            // reference never changes the view (auto bounds, Fit, reset).
+            let span = time_span(&[
+                self.channel_1_data.as_slice(),
+                self.channel_2_data.as_slice(),
+            ])?;
+            let points: Vec<[f64; 2]> = ch
+                .points
+                .iter()
+                .filter(|p| span.contains(&p[0]))
+                .map(|p| [p[0], map.to_plot(p[1])])
+                .collect();
+            Some((
+                format!("REF CH{}", i + 1),
+                decimate(&points, 4 * OVERVIEW_BUCKETS),
+                palette::reference(i),
+            ))
+        })
+    }
+
+    /// Parse a reference file. A bad file gives the error banner and keeps
+    /// the reference shown before.
+    fn load_reference(&mut self, name: String, bytes: &[u8]) {
+        match parser::parse(bytes) {
+            Ok(w) => {
+                self.reference = Some((name, w));
+                self.show_reference = true;
+            }
+            Err(e) => {
+                self.error = Some(format!("Could not open reference {name}: {e}."));
+            }
+        }
+    }
+
+    /// Save the samples of the main waveform as CSV.
+    fn export_csv(&mut self) {
+        let (Some(w), Some(name)) = (&self.waveform, &self.file_name) else {
+            return;
+        };
+        let text = export::csv(w, name, VERSION);
+        let file = format!("{}.csv", export::stem(name));
+        if let Err(e) = export::save(&file, text.as_bytes(), "text/csv", ("CSV", "csv")) {
+            self.error = Some(format!("Could not save {file}: {e}."));
+        }
+    }
+
+    /// Start a screenshot (for a PNG file or for printing). Printing uses the
+    /// white screen to save ink.
+    fn start_shot(&mut self, ctx: &egui::Context, purpose: ShotPurpose) {
+        let restore_dark = purpose == ShotPurpose::Print && !self.light_theme;
+        if restore_dark {
+            self.set_light_theme(ctx, true);
+        }
+        self.shot = Some(ShotJob {
+            purpose,
+            frames_left: 3,
+            sent: false,
+            restore_dark,
+        });
+        ctx.request_repaint();
+    }
+
+    /// Advance the screenshot in progress: wait a few frames, send the
+    /// command, then save or print the image when it arrives.
+    fn update_shot(&mut self, ctx: &egui::Context) {
+        let Some(mut job) = self.shot else { return };
+        if !job.sent {
+            if job.frames_left > 0 {
+                job.frames_left -= 1;
+            } else {
+                let tx = self.shot_tx.clone();
+                let repaint = ctx.clone();
+                ctx.request_screenshot(move |image| {
+                    let _ = tx.send(image);
+                    repaint.request_repaint();
+                });
+                job.sent = true;
+            }
+            self.shot = Some(job);
+            ctx.request_repaint();
+            return;
+        }
+        let Ok(image) = self.shot_rx.try_recv() else {
+            return;
+        };
+        self.shot = None;
+        if job.restore_dark {
+            self.set_light_theme(ctx, false);
+        }
+        let base = self
+            .file_name
+            .as_deref()
+            .map_or("fnirsi-viewer", export::stem);
+        let result = export::png(&image).and_then(|png| match job.purpose {
+            ShotPurpose::Save => export::save(
+                &format!("{base}.png"),
+                &png,
+                "image/png",
+                ("PNG image", "png"),
+            )
+            .map(|_| ()),
+            ShotPurpose::Print => export::print_png(&png),
+        });
+        if let Err(e) = result {
+            self.error = Some(format!("Could not save or print the picture: {e}."));
+        }
+    }
+
+    /// Switch between the black and the white screen.
+    fn set_light_theme(&mut self, ctx: &egui::Context, light: bool) {
+        self.light_theme = light;
+        palette::set_light(light);
+        ctx.set_theme(if light {
+            egui::Theme::Light
+        } else {
+            egui::Theme::Dark
+        });
+    }
+
+    /// Contents of the File menu.
+    fn file_menu(&mut self, ui: &mut egui::Ui) {
+        let loaded = self.waveform.is_some();
+        if ui
+            .button("Open file…")
+            .on_hover_text("Open a FNIRSI .wav file (Ctrl/⌘+O), or drop it on the window")
+            .clicked()
+        {
+            ui.close();
+            self.open_file_dialog(ui.ctx());
+        }
+        ui.menu_button("Open example", |ui| {
+            for e in examples::EXAMPLES {
+                if ui.button(e.label).on_hover_text(e.about).clicked() {
+                    self.load_bytes(e.file.to_owned(), e.bytes);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            ui.label(
+                RichText::new(examples::CREDIT)
+                    .small()
+                    .color(palette::hint()),
+            );
+        });
+        ui.separator();
+        if ui
+            .add_enabled(loaded, egui::Button::new("Open reference…"))
+            .on_hover_text("Open a second file, drawn faint behind the traces, to compare with")
+            .clicked()
+        {
+            ui.close();
+            self.open_dialog(ui.ctx(), LoadTarget::Reference);
+        }
+        if let Some((name, _)) = &self.reference {
+            let label = format!("Show reference ({name})");
+            ui.checkbox(&mut self.show_reference, label);
+            if ui.button("Close reference").clicked() {
+                self.reference = None;
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui
+            .add_enabled(loaded, egui::Button::new("Export CSV…"))
+            .on_hover_text("Save the samples as a table: time and the voltage of each channel")
+            .clicked()
+        {
+            ui.close();
+            self.export_csv();
+        }
+        if ui
+            .add_enabled(loaded, egui::Button::new("Save screenshot (PNG)…"))
+            .on_hover_text("Save a picture of the plots and readouts, as shown")
+            .clicked()
+        {
+            ui.close();
+            self.start_shot(ui.ctx(), ShotPurpose::Save);
+        }
+        if ui
+            .add_enabled(loaded, egui::Button::new("Print…"))
+            .on_hover_text("Print the plots and readouts on a white screen (Ctrl/⌘+P)")
+            .clicked()
+        {
+            ui.close();
+            self.start_shot(ui.ctx(), ShotPurpose::Print);
         }
     }
 
@@ -597,13 +855,9 @@ impl ScopeApp {
             )
             .on_hover_text(format!("fnirsi-viewer {VERSION}, commit {GIT_HASH}"));
             ui.add_space(8.0);
-            if ui
-                .button("⏏ Open file…")
-                .on_hover_text("Open a FNIRSI .wav file (or drop it on the window)")
-                .clicked()
-            {
-                self.open_file_dialog(ui.ctx());
-            }
+            ui.menu_button("⏏ File ▾", |ui| self.file_menu(ui))
+                .response
+                .on_hover_text("Open, examples, reference, export, print");
             let loaded = self.waveform.is_some();
             // All the options are menu buttons with ▾, so the bar is the same
             // on a wide and on a narrow (phone) screen.
@@ -675,17 +929,11 @@ impl ScopeApp {
                 ("◐ White", "White screen with darker traces, for printing")
             };
             if ui.button(theme_label).on_hover_text(theme_tip).clicked() {
-                self.light_theme = !self.light_theme;
-                palette::set_light(self.light_theme);
-                ui.ctx().set_theme(if self.light_theme {
-                    egui::Theme::Light
-                } else {
-                    egui::Theme::Dark
-                });
+                self.set_light_theme(ui.ctx(), !self.light_theme);
             }
             ui.add_space(8.0);
             if ui
-                .button("❔ Help")
+                .button("? Help")
                 .on_hover_text("How to use the viewer: controls, cursors, measurements")
                 .clicked()
             {
@@ -805,6 +1053,27 @@ impl ScopeApp {
                 );
             }
             readout(ui, "PTS", Some(w.samples_per_channel.to_string()), palette::fg_dim());
+            // Reference: a click hides or shows it, like a channel.
+            if let Some((name, _)) = &self.reference {
+                let text = format!("REF {name}");
+                let color = if self.show_reference {
+                    palette::reference(0)
+                } else {
+                    palette::off()
+                };
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new(text).monospace().strong().color(color))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::new(1.0, color))
+                            .corner_radius(3),
+                    )
+                    .on_hover_text("Reference waveform (File ▾ → Open reference…). Click to hide or show it.")
+                    .clicked()
+                {
+                    self.show_reference = !self.show_reference;
+                }
+            }
 
             let clipped: Vec<&str> = [("CH1", &w.ch1), ("CH2", &w.ch2)]
                 .iter()
@@ -1052,7 +1321,7 @@ impl ScopeApp {
                 i.pointer.primary_down(),
             )
         });
-        if !down || self.y_axis != YAxis::Divisions {
+        if !down {
             self.marker_drag = None;
             return;
         }
@@ -1061,6 +1330,16 @@ impl ScopeApp {
         };
         if pressed && on_plot && self.marker_drag.is_none() && self.cursors.dragging.is_none() {
             self.marker_drag = marker_at(&t, &self.y_maps(), pos);
+            // Volts mode: both channels share one axis, so a channel cannot
+            // move alone. A drag on a marker switches to Div, where it can.
+            if self.marker_drag.is_some() && self.y_axis == YAxis::Volts {
+                self.set_y_axis(YAxis::Divisions);
+                return;
+            }
+        }
+        if self.y_axis != YAxis::Divisions {
+            self.marker_drag = None;
+            return;
         }
         let Some(i) = self.marker_drag else { return };
         let Some(w) = &self.waveform else { return };
@@ -1087,13 +1366,15 @@ impl ScopeApp {
             self.help_open = !self.help_open;
         }
         if key(Modifiers::NONE, Key::B) {
-            self.light_theme = !self.light_theme;
-            palette::set_light(self.light_theme);
-            ctx.set_theme(if self.light_theme {
-                egui::Theme::Light
-            } else {
-                egui::Theme::Dark
-            });
+            self.set_light_theme(ctx, !self.light_theme);
+        }
+        if self.waveform.is_some()
+            && self.shot.is_none()
+            && ctx.input_mut(|i| {
+                i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::P))
+            })
+        {
+            self.start_shot(ctx, ShotPurpose::Print);
         }
         if self.waveform.is_none() {
             return;
@@ -1505,6 +1786,7 @@ impl ScopeApp {
         ) && self.marker_drag.is_none();
         let maps = self.y_maps();
         let [data_1, data_2] = self.plot_data();
+        let reference_lines = self.reference_lines();
         if self.zoom_view {
             self.overview(ui, [&data_1, &data_2]);
             ui.add_space(4.0);
@@ -1684,6 +1966,10 @@ impl ScopeApp {
                         .width(1.0)
                         .style(LineStyle::Dotted { spacing: 6.0 }),
                 );
+                // Reference waveform first, so the traces are drawn over it.
+                for (name, points, color) in reference_lines.into_iter().flatten() {
+                    plot.line(Line::new(name, points).color(color).width(1.0));
+                }
                 if !data_1.is_empty() {
                     plot.line(Line::new("CH1", data_1).color(palette::ch1()).width(1.5));
                 }
@@ -1695,11 +1981,28 @@ impl ScopeApp {
             .update_pointer_icon(ui.ctx(), &response.transform);
         draw_trigger_marker(ui, &response.transform);
         draw_ground_markers(ui, &response.transform, &maps);
-        if self.y_axis == YAxis::Divisions && on_plot {
+        if on_plot {
             let pos = ui.ctx().input(|i| i.pointer.latest_pos());
             let over = pos.and_then(|p| marker_at(&response.transform, &maps, p));
             if self.marker_drag.is_some() || over.is_some() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+            }
+            if let (Some(i), None) = (over, self.marker_drag) {
+                let tip = if self.y_axis == YAxis::Divisions {
+                    format!("CH{}: 0 V. Drag to move the channel up or down.", i + 1)
+                } else {
+                    format!(
+                        "CH{}: 0 V. Drag to move the channel up or down (switches Y to Div: in Volts the channels share one axis).",
+                        i + 1
+                    )
+                };
+                egui::Tooltip::always_open(
+                    ui.ctx().clone(),
+                    ui.layer_id(),
+                    egui::Id::unique("marker_tip"),
+                    egui::PopupAnchor::Pointer,
+                )
+                .show(|ui| ui.label(tip));
             }
         }
         // The measurements use the view of the last frame: draw once more
@@ -1720,6 +2023,7 @@ impl eframe::App for ScopeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         palette::set_light(self.light_theme);
+        self.update_shot(&ctx);
         // No shortcuts while the welcome screen is open.
         if !self.splash_open {
             self.handle_keys(&ctx);
@@ -1985,10 +2289,21 @@ fn help_text(ui: &mut egui::Ui) {
         ui,
         "Open a file",
         &[
-            "Drop a .wav file on the window, or click ⏏ Open file….",
+            "Drop a .wav file on the window, or use ⏏ File ▾ → Open file….",
+            "File ▾ → Open example: real 1013D captures to try the viewer without a scope.",
             "Supported: DPOX180H, and 1013D/1014D with the original FNIRSI firmware. The model is found automatically and shown at the top left.",
             "The file is read on this device; nothing is uploaded.",
             "If a file cannot be opened, a red banner says why, and the file shown before stays.",
+        ],
+    );
+    section(
+        ui,
+        "Compare, export and print (⏏ File menu)",
+        &[
+            "Open reference…: a second file drawn faint behind the traces (grey for CH1, blue-grey for CH2), to compare before and after. Click the REF readout at the bottom to hide or show it.",
+            "Export CSV…: all the samples as a table (time and the voltage of each channel), with the settings in # lines at the top.",
+            "Save screenshot (PNG)…: a picture of the screen as shown.",
+            "Print… (Ctrl/⌘+P): prints a picture of the screen on a white background to save ink. On the desktop, the picture opens in the image viewer, where you can print it.",
         ],
     );
     section(
@@ -2009,7 +2324,7 @@ fn help_text(ui: &mut egui::Ui) {
         &[
             "Volts: one voltage axis for both channels.",
             "Div: like the scope screen, 8 divisions. Each channel uses its own V/div and starts from its ground marker.",
-            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel. In Div mode, drag a marker to move that channel up or down; Y ▾ → Reset channel positions puts them back.",
+            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel. Drag a marker to move that channel up or down. This needs Y: Div (each channel has its own scale); a drag in Volts mode switches to Div. Y ▾ → Reset channel positions puts them back.",
             "The orange T on the top edge is the trigger (t = 0).",
         ],
     );
@@ -2057,7 +2372,7 @@ fn help_text(ui: &mut egui::Ui) {
         ui,
         "Keyboard",
         &[
-            "Ctrl/⌘+O: open a file. F1: this help. B: black or white screen.",
+            "Ctrl/⌘+O: open a file. Ctrl/⌘+P: print. F1: this help. B: black or white screen.",
             "F: fit both. H: fit time. V: fit vertical.",
             "Z: zoom view. S: spectrum (FFT). Y: volts or divisions. 1, 2: hide or show CH1, CH2.",
             "+ and −: zoom the time axis. Arrows: move the view (Shift: more).",

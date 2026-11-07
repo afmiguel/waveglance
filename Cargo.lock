@@ -1270,13 +1270,15 @@ dependencies = [
 
 [[package]]
 name = "fnirsi-viewer"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "binrw",
  "eframe",
  "egui_plot",
  "env_logger",
+ "js-sys",
  "log",
+ "png",
  "rfd",
  "serde",
  "wasm-bindgen",
