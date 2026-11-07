@@ -3,12 +3,14 @@
 A viewer for the waveform files (`.wav`) that FNIRSI oscilloscopes save. It
 runs on the desktop and in a web browser (WebAssembly).
 
-Supported models (found automatically from the file):
+Supported files (the format is found automatically from the file; if it is
+not certain, a window asks):
 
 | Model | File | Notes |
 |-------|------|-------|
 | DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes |
 | 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
+| CSV / text, any oscilloscope | `.csv`, `.txt`: time + channel columns | Keysight, Rigol, Tektronix, Siglent layouts and this viewer's export; `,` `;` tab separators |
 
 These `.wav` files are **not** audio files. Each model has its own binary
 format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,

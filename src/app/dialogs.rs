@@ -22,8 +22,9 @@ impl ScopeApp {
                 );
                 ui.add_space(6.0);
                 ui.label(
-                    "Opens the waveform files (.wav) that FNIRSI DPOX180H, 1013D and 1014D \
-                 oscilloscopes save. The files are read on this device: nothing is uploaded.",
+                    "Opens the waveform files of FNIRSI DPOX180H and 1013D/1014D oscilloscopes \
+                 (.wav), and CSV files from any oscilloscope. The files are read on this \
+                 device: nothing is uploaded.",
                 );
                 ui.add_space(8.0);
                 ui.label(RichText::new("Controls").strong());
@@ -104,16 +105,96 @@ impl ScopeApp {
     pub(super) fn error_banner(&mut self, ui: &mut egui::Ui) {
         let Some(err) = &self.error else { return };
         let mut close = false;
+        let mut open_as = false;
+        let can_retry = self.failed_file.is_some();
         ui.horizontal(|ui| {
             if ui.button("✕").on_hover_text("Close this message").clicked() {
                 close = true;
+            }
+            if can_retry
+                && ui
+                    .button("Open as…")
+                    .on_hover_text("Choose the format of this file yourself")
+                    .clicked()
+            {
+                open_as = true;
             }
             ui.add(
                 egui::Label::new(RichText::new(format!("⚠ {err}")).color(palette::error())).wrap(),
             );
         });
+        if open_as && let Some((target, name, bytes)) = self.failed_file.take() {
+            self.format_choice = Some(FormatChoice {
+                candidates: crate::formats::detect(&bytes),
+                target,
+                name,
+                bytes,
+                reason: "Choose the format to read this file with.".to_owned(),
+            });
+            close = true;
+        }
         if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.error = None;
+        }
+    }
+
+    /// The "Which format is this file?" window: the likely formats first,
+    /// then all the others; the chosen one reads the file.
+    pub(super) fn format_window(&mut self, ctx: &egui::Context) {
+        let Some(choice) = &self.format_choice else {
+            return;
+        };
+        let mut chosen: Option<&'static dyn crate::formats::Format> = None;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::unique("format_choice")).show(ctx, |ui| {
+            ui.set_max_width(440.0);
+            ui.heading("Which format is this file?");
+            ui.label(RichText::new(&choice.name).monospace());
+            ui.label(&choice.reason);
+            ui.add_space(6.0);
+            let likely: Vec<&'static dyn crate::formats::Format> =
+                choice.candidates.iter().map(|c| c.0).collect();
+            if !likely.is_empty() {
+                ui.label(RichText::new("Possible formats").strong());
+                for (f, c) in &choice.candidates {
+                    let how = match c {
+                        crate::formats::Confidence::Sure => "certain",
+                        crate::formats::Confidence::Likely => "likely",
+                        _ => "possible",
+                    };
+                    if ui.button(format!("{} ({how})", f.name())).clicked() {
+                        chosen = Some(*f);
+                    }
+                }
+                ui.add_space(4.0);
+            }
+            let others: Vec<&'static dyn crate::formats::Format> = crate::formats::FORMATS
+                .iter()
+                .copied()
+                .filter(|f| !likely.iter().any(|l| l.name() == f.name()))
+                .collect();
+            if !others.is_empty() {
+                ui.label(RichText::new("Other formats").strong());
+                for f in others {
+                    if ui.button(f.name()).clicked() {
+                        chosen = Some(f);
+                    }
+                }
+            }
+            ui.add_space(6.0);
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+        if modal.should_close() {
+            cancel = true;
+        }
+        if let Some(format) = chosen
+            && let Some(choice) = self.format_choice.take()
+        {
+            self.read_as(choice.target, choice.name, &choice.bytes, format);
+        } else if cancel {
+            self.format_choice = None;
         }
     }
 
@@ -203,8 +284,8 @@ impl ScopeApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let mut any = false;
                     for (name, ch, color, _) in self.measured_channels(&window) {
-                        let ch = ch.as_ref();
-                        let r = measure::measure(ch.points(), &window, MIN_AMPLITUDE_DIV * ch.display.per_div);
+                        let r = self.measure_cached(&name, &ch, &window);
+                        let ch = &*ch;
                         any |= stats_table(ui, &name, &r, ch, color, &self.measure);
                         ui.add_space(6.0);
                     }
@@ -237,9 +318,11 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         ui,
         "Open a file",
         &[
-            "Drop a .wav file on the window, or use ⏏ File ▾ → Open file….",
+            "Drop a file on the window, or use ⏏ File ▾ → Open file….",
             "File ▾ → Open example: real 1013D captures to try the viewer without a scope.",
-            "Supported: DPOX180H, and 1013D/1014D with the original FNIRSI firmware. The model is found automatically and shown at the top left.",
+            "Supported: FNIRSI DPOX180H, FNIRSI 1013D/1014D (original firmware), and CSV/text tables from any oscilloscope (Keysight, Rigol, Tektronix, Siglent… and this viewer's own export). The format is found automatically; the maker and model are shown at the top left.",
+            "If the format is not certain, a window asks which one it is. If a file cannot be read, the red banner has an \"Open as…\" button to choose the format yourself.",
+            "CSV: the first number column is the time (s), the others are channels; the names come from the header line. Files with up to millions of samples are drawn fast: only the part in view, at about two points per pixel.",
             "The file is read on this device; nothing is uploaded.",
             "If a file cannot be opened, a red banner says why, and the file shown before stays.",
         ],

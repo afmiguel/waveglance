@@ -200,7 +200,7 @@ impl ScopeApp {
                 None => "FNIRSI Viewer".to_owned(),
             };
             ui.label(RichText::new(title).strong().color(palette::fg_dim()))
-                .on_hover_text("Supported: DPOX180H, 1013D and 1014D (original firmware)");
+                .on_hover_text("Reads FNIRSI DPOX180H and 1013D/1014D .wav files, and CSV files of any oscilloscope");
             // Version, discreet: identifies the build (also between releases).
             ui.label(
                 RichText::new(format!("v{VERSION}"))

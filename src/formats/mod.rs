@@ -5,6 +5,7 @@
 //! is in its format ([`Format::probe`]), and reads it ([`Format::read`]).
 //! [`open`] tries the formats from the most to the least sure.
 
+pub mod csv;
 pub mod fnirsi_1013d;
 pub mod fnirsi_dpox;
 
@@ -50,7 +51,11 @@ impl std::fmt::Display for ReadError {
 impl std::error::Error for ReadError {}
 
 /// All the formats, in the order they are tried when they are equally sure.
-pub static FORMATS: &[&dyn Format] = &[&fnirsi_dpox::DpoxFormat, &fnirsi_1013d::Fnirsi1013dFormat];
+pub static FORMATS: &[&dyn Format] = &[
+    &fnirsi_dpox::DpoxFormat,
+    &fnirsi_1013d::Fnirsi1013dFormat,
+    &csv::CsvFormat,
+];
 
 /// The formats that may fit `bytes`, the most sure first.
 pub fn detect(bytes: &[u8]) -> Vec<(&'static dyn Format, Confidence)> {
@@ -62,6 +67,28 @@ pub fn detect(bytes: &[u8]) -> Vec<(&'static dyn Format, Confidence)> {
     // Stable sort: equally sure formats keep their order in FORMATS.
     found.sort_by_key(|f| std::cmp::Reverse(f.1));
     found
+}
+
+/// What to do with a file, after detection.
+pub enum Decision {
+    /// One format is clearly the right one: read with it.
+    Read(&'static dyn Format),
+    /// Not clear: ask the user. The candidates, the most likely first (empty
+    /// if no format recognises the file).
+    Ask(Vec<(&'static dyn Format, Confidence)>),
+}
+
+/// Decide how to open `bytes`: read directly if one format is `Sure`, or is
+/// the only `Likely` one; else ask the user.
+pub fn decide(bytes: &[u8]) -> Decision {
+    let found = detect(bytes);
+    let top = found.first().map(|f| f.1);
+    let likely = found.iter().filter(|f| f.1 == Confidence::Likely).count();
+    match top {
+        Some(Confidence::Sure) => Decision::Read(found[0].0),
+        Some(Confidence::Likely) if likely == 1 => Decision::Read(found[0].0),
+        _ => Decision::Ask(found),
+    }
 }
 
 /// Find the format of `bytes` and read it. The formats are tried from the
@@ -143,6 +170,15 @@ pub(crate) fn adc_trace(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decisions() {
+        assert!(matches!(decide(&[0; 10]), Decision::Ask(c) if c.is_empty()));
+        // A 15000-byte file with impossible 1013D header values: only "Maybe".
+        let mut b = vec![0xFFu8; 15_000];
+        b[0] = 1;
+        assert!(matches!(decide(&b), Decision::Ask(c) if c.len() == 1));
+    }
 
     #[test]
     fn unknown_bytes() {

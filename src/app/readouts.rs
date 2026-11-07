@@ -167,14 +167,14 @@ impl ScopeApp {
     pub(super) fn measured_channels(
         &self,
         window: &RangeInclusive<f64>,
-    ) -> Vec<(String, Cow<'_, Trace>, Color32, bool)> {
+    ) -> Vec<(String, TraceRef<'_>, Color32, bool)> {
         let mut rows = Vec::new();
         let traces = self.traces();
         for (i, t) in traces.iter().enumerate() {
             if self.measure.is_measured(&t.label) && self.visible[i] {
                 rows.push((
                     t.label.clone(),
-                    Cow::Borrowed(t),
+                    TraceRef::File(t),
                     palette::channel(i),
                     t.clipped_in(window),
                 ));
@@ -185,7 +185,12 @@ impl ScopeApp {
             let clipped = [self.math.a, self.math.b]
                 .iter()
                 .any(|&i| traces.get(i).is_some_and(|t| t.clipped_in(window)));
-            rows.push(("MATH".to_owned(), Cow::Owned(m), palette::math(), clipped));
+            rows.push((
+                "MATH".to_owned(),
+                TraceRef::Math(m),
+                palette::math(),
+                clipped,
+            ));
         }
         rows
     }
@@ -196,8 +201,8 @@ impl ScopeApp {
             return;
         };
         for (name, ch, color, clipped) in self.measured_channels(&window) {
-            let ch = ch.as_ref();
-            let r = measure::measure(ch.points(), &window, MIN_AMPLITUDE_DIV * ch.display.per_div);
+            let r = self.measure_cached(&name, &ch, &window);
+            let ch = &*ch;
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new(format!("{name} ({window_name})"))

@@ -291,7 +291,7 @@ impl ScopeApp {
             let text = if hovering {
                 "Release to load the file"
             } else {
-                "Drop a FNIRSI .wav file here (DPOX180H, 1013D, 1014D), or click \"Open file…\""
+                "Drop a waveform file here (FNIRSI .wav, or CSV from any oscilloscope), or use File ▾ → Open file…"
             };
             ui.centered_and_justified(|ui| {
                 ui.label(RichText::new(text).size(18.0).color(palette::hint()))
@@ -314,11 +314,16 @@ impl ScopeApp {
             on_plot,
         ) && self.marker_drag.is_none();
         let maps = self.y_maps();
-        let data = self.plot_data();
+        // Only the part of each trace in view, about 2 points per pixel: a
+        // long record draws as fast as a short one.
+        let view = self.last_transform.as_ref().map(|t| t.bounds().range_x());
+        let max_points = (ui.available_width().max(200.0) * 2.0) as usize;
+        let data = self.plot_data_in(view.as_ref(), max_points);
+        let record_span = self.waveform.as_ref().and_then(Capture::time_span);
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
         let reference_lines = self.reference_lines();
         let math = self.math_channel();
-        let math_map = self.math_map(math.as_ref());
+        let math_map = self.math_map(math.as_deref());
         let math_data: Vec<[f64; 2]> = match (&math, math_map) {
             (Some(m), Some(map)) => m
                 .points()
@@ -328,7 +333,8 @@ impl ScopeApp {
             _ => Vec::new(),
         };
         if self.zoom_view {
-            self.overview(ui, &data);
+            let whole = self.plot_data_in(None, 2 * OVERVIEW_BUCKETS);
+            self.overview(ui, &whole);
             ui.add_space(4.0);
         }
         let view_command = self.pending_view.take();
@@ -490,7 +496,7 @@ impl ScopeApp {
                     let channels: Vec<&[[f64; 2]]> = data.iter().map(Vec::as_slice).collect();
                     let mut time = plot.plot_bounds().range_x();
                     if matches!(fit, Fit::Horizontal | Fit::Both)
-                        && let Some(full) = time_span(&channels)
+                        && let Some(full) = record_span.clone()
                     {
                         time = full.clone();
                         plot.set_plot_bounds_x(full);

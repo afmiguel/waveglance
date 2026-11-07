@@ -17,8 +17,9 @@ use crate::palette;
 use crate::{examples, export};
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{HoverPosition, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
-use std::borrow::Cow;
+use std::cell::RefCell;
 use std::ops::RangeInclusive;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// Significant digits of the measurement and cursor readouts.
@@ -70,6 +71,39 @@ enum LoadTarget {
     Main,
     /// The reference waveform, drawn faint for comparison.
     Reference,
+}
+
+/// What the Math channel depends on: the file and the Math settings.
+type MathKey = (u64, MathSettings);
+/// What a measurement depends on: file, trace name, time window, Math settings.
+type MeasureKey = (u64, String, u64, u64, MathSettings);
+
+/// A trace to measure: one of the file (borrowed) or the Math channel (shared).
+enum TraceRef<'a> {
+    File(&'a Trace),
+    Math(Rc<Trace>),
+}
+
+impl std::ops::Deref for TraceRef<'_> {
+    type Target = Trace;
+    fn deref(&self) -> &Trace {
+        match self {
+            Self::File(t) => t,
+            Self::Math(t) => t,
+        }
+    }
+}
+
+/// A file whose format is not certain, waiting for the user to choose it
+/// (the "Which format is this file?" window).
+struct FormatChoice {
+    target: LoadTarget,
+    name: String,
+    bytes: Vec<u8>,
+    /// The formats that may fit, the most likely first.
+    candidates: Vec<(&'static dyn formats::Format, formats::Confidence)>,
+    /// Why the window is open, for the user.
+    reason: String,
 }
 
 /// A file read by the open dialog or by drag-and-drop: (target, name, bytes or error).
@@ -320,6 +354,15 @@ pub struct ScopeApp {
     /// Screenshots arrive here (egui calls back after the frame is drawn).
     shot_tx: Sender<std::sync::Arc<egui::ColorImage>>,
     shot_rx: Receiver<std::sync::Arc<egui::ColorImage>>,
+    /// The Math channel of the current file and Math settings.
+    math_cache: RefCell<Option<(MathKey, Option<Rc<Trace>>)>>,
+    /// Recent measurement results: (key, results).
+    measure_cache: RefCell<Vec<(MeasureKey, Rc<measure::Results>)>>,
+    /// A file waiting for the user to choose its format.
+    format_choice: Option<FormatChoice>,
+    /// The last file that could not be read, for the "Open as…" button of
+    /// the error banner: (target, name, bytes).
+    failed_file: Option<(LoadTarget, String, Vec<u8>)>,
     /// Tab presses taken from egui while cursors are on (they select the
     /// next cursor instead of moving the keyboard focus between buttons).
     tab_presses: usize,
@@ -401,6 +444,10 @@ impl ScopeApp {
             vdiv_override: Vec::new(),
             vdiv_wheel: 0.0,
             tab_presses: 0,
+            format_choice: None,
+            math_cache: RefCell::new(None),
+            measure_cache: RefCell::new(Vec::new()),
+            failed_file: None,
             reference: None,
             show_reference: true,
             shot: None,
@@ -423,8 +470,48 @@ impl ScopeApp {
 
     /// Parse the bytes of a file and show the result.
     pub fn load_bytes(&mut self, name: String, bytes: &[u8]) {
-        match formats::open(bytes) {
+        self.open_bytes(LoadTarget::Main, name, bytes);
+    }
+
+    /// Find the format of a file and read it. If the format is not certain,
+    /// the "Which format is this file?" window asks the user.
+    fn open_bytes(&mut self, target: LoadTarget, name: String, bytes: &[u8]) {
+        match formats::decide(bytes) {
+            formats::Decision::Read(format) => self.read_as(target, name, bytes, format),
+            formats::Decision::Ask(candidates) => {
+                let reason = if candidates.is_empty() {
+                    "No known format was recognised in this file.".to_owned()
+                } else {
+                    "The format of this file is not certain.".to_owned()
+                };
+                self.format_choice = Some(FormatChoice {
+                    target,
+                    name,
+                    bytes: bytes.to_vec(),
+                    candidates,
+                    reason,
+                });
+            }
+        }
+    }
+
+    /// Read a file with `format` and show it (main file or reference). On an
+    /// error, the banner offers "Open as…" to try another format.
+    fn read_as(
+        &mut self,
+        target: LoadTarget,
+        name: String,
+        bytes: &[u8],
+        format: &'static dyn formats::Format,
+    ) {
+        match format.read(bytes) {
+            Ok(w) if target == LoadTarget::Reference => {
+                self.reference = Some((name, w));
+                self.show_reference = true;
+                self.failed_file = None;
+            }
             Ok(w) => {
+                self.failed_file = None;
                 let n = w.traces.len();
                 self.visible = vec![true; n];
                 self.ground_shift = vec![0.0; n];
@@ -434,6 +521,7 @@ impl ScopeApp {
                 }
                 self.waveform = Some(w);
                 self.error = None;
+                self.file_name = Some(name);
                 self.load_count += 1;
                 self.marker_drag = None;
                 // New file: cursors at 1/4 and 3/4 of the waveform.
@@ -447,11 +535,18 @@ impl ScopeApp {
                 self.last_transform = None;
             }
             Err(e) => {
-                self.report_open_error(&name, &e.to_string());
-                return;
+                let what = if target == LoadTarget::Reference {
+                    "reference "
+                } else {
+                    ""
+                };
+                self.report_open_error(
+                    &format!("{what}{name}"),
+                    &format!("{} ({e})", format.name()),
+                );
+                self.failed_file = Some((target, name, bytes.to_vec()));
             }
         }
-        self.file_name = Some(name);
     }
 
     /// The traces of the file shown (empty without a file).
@@ -510,7 +605,7 @@ impl ScopeApp {
 
     /// The Math channel, computed sample by sample from its two traces (both
     /// in the file, with the same samples). Its V/div is the larger of the two.
-    pub fn math_channel(&self) -> Option<Trace> {
+    fn compute_math(&self) -> Option<Trace> {
         if !self.math_available() {
             return None;
         }
@@ -541,6 +636,48 @@ impl ScopeApp {
         Some(trace)
     }
 
+    /// The Math channel, from the cache (computed again only when the file
+    /// or the Math settings change).
+    pub fn math_channel(&self) -> Option<Rc<Trace>> {
+        let key = (self.load_count, self.math);
+        let mut cache = self.math_cache.borrow_mut();
+        if cache.as_ref().map(|c| c.0) != Some(key) {
+            *cache = Some((key, self.compute_math().map(Rc::new)));
+        }
+        cache.as_ref()?.1.clone()
+    }
+
+    /// Measurements of a trace in a time window, from a cache: the readouts
+    /// and the statistics window use the same results in a frame.
+    fn measure_cached(
+        &self,
+        name: &str,
+        ch: &Trace,
+        window: &RangeInclusive<f64>,
+    ) -> Rc<measure::Results> {
+        let key = (
+            self.load_count,
+            name.to_owned(),
+            window.start().to_bits(),
+            window.end().to_bits(),
+            self.math,
+        );
+        let mut cache = self.measure_cache.borrow_mut();
+        if let Some((_, r)) = cache.iter().find(|(k, _)| *k == key) {
+            return r.clone();
+        }
+        let r = Rc::new(measure::measure(
+            ch.points(),
+            window,
+            MIN_AMPLITUDE_DIV * ch.display.per_div,
+        ));
+        if cache.len() >= 8 {
+            cache.remove(0);
+        }
+        cache.push((key, r.clone()));
+        r
+    }
+
     /// Plot mapping of the Math channel (`None` if off or hidden).
     fn math_map(&self, math: Option<&Trace>) -> Option<YMap> {
         let m = math.filter(|_| self.math_visible)?;
@@ -556,12 +693,48 @@ impl ScopeApp {
     /// The channel points in plot units: `[time_s, y]`.
     /// One entry per trace (empty if hidden).
     fn plot_data(&self) -> Vec<Vec<[f64; 2]>> {
+        self.plot_data_in(None, usize::MAX)
+    }
+
+    /// The trace points to draw: only the samples in `view` (all if `None`),
+    /// reduced to about `max_points` min/max points, in plot units. When
+    /// cut to the view, the first and last samples of the record are kept, so
+    /// that the automatic bounds (double-click reset) still cover the whole
+    /// record. One entry per trace (empty if hidden).
+    fn plot_data_in(
+        &self,
+        view: Option<&RangeInclusive<f64>>,
+        max_points: usize,
+    ) -> Vec<Vec<[f64; 2]>> {
         self.traces()
             .iter()
             .zip(self.y_maps())
-            .map(|(t, map)| match map {
-                Some(m) => t.points().iter().map(|p| [p[0], m.to_plot(p[1])]).collect(),
-                None => Vec::new(),
+            .map(|(t, map)| {
+                let Some(m) = map else { return Vec::new() };
+                let all = t.points();
+                let part = match view {
+                    Some(v) => {
+                        // One sample of margin on each side, so the line
+                        // reaches the edges of the plot.
+                        let a = all.partition_point(|p| p[0] < *v.start()).saturating_sub(1);
+                        let b = (all.partition_point(|p| p[0] <= *v.end()) + 1).min(all.len());
+                        &all[a..b.max(a)]
+                    }
+                    None => all,
+                };
+                let mut out = decimate(part, max_points / 2);
+                if view.is_some() && part.len() < all.len() {
+                    if let Some(first) = all.first().filter(|f| out.first() != Some(f)) {
+                        out.insert(0, *first);
+                    }
+                    if let Some(last) = all.last().filter(|l| out.last() != Some(l)) {
+                        out.push(*last);
+                    }
+                }
+                for p in &mut out {
+                    p[1] = m.to_plot(p[1]);
+                }
+                out
             })
             .collect()
     }
@@ -590,18 +763,9 @@ impl ScopeApp {
         self.error = Some(format!("Could not open {name}: {error}.{still}"));
     }
 
-    /// Parse a reference file. A bad file gives the error banner and keeps
-    /// the reference shown before.
+    /// Open a reference file (same detection as the main file).
     fn load_reference(&mut self, name: String, bytes: &[u8]) {
-        match formats::open(bytes) {
-            Ok(w) => {
-                self.reference = Some((name, w));
-                self.show_reference = true;
-            }
-            Err(e) => {
-                self.error = Some(format!("Could not open reference {name}: {e}."));
-            }
-        }
+        self.open_bytes(LoadTarget::Reference, name, bytes);
     }
 }
 
@@ -610,8 +774,8 @@ impl eframe::App for ScopeApp {
         let ctx = ui.ctx().clone();
         palette::set_light(self.light_theme);
         self.update_shot(&ctx);
-        // No shortcuts while the welcome screen or the Print window is open.
-        if !self.splash_open && !self.print_dialog {
+        // No shortcuts while the welcome screen or a window that asks is open.
+        if !self.splash_open && !self.print_dialog && self.format_choice.is_none() {
             self.handle_keys(&ctx);
         }
         self.handle_dropped_files(&ctx);
@@ -623,6 +787,7 @@ impl eframe::App for ScopeApp {
         }
         self.splash(&ctx);
         self.print_window(&ctx);
+        self.format_window(&ctx);
         self.stats_window(&ctx);
         if self.help_open {
             self.help(&ctx);

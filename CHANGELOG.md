@@ -5,6 +5,23 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.10.0 — 2026-11-07
+
+- **CSV files from any oscilloscope** (and other delimited text): Keysight
+  (names + units lines), Rigol (sample number with Start/Increment),
+  Tektronix (settings in the first columns), Siglent, and this viewer's own
+  export (which also gives back V/div, probe and coupling). Separators `,`
+  `;` or tab; decimal comma with `;`; current channels (A). The maker is
+  shown when the header names it.
+- **Format detection with a choice window**: a file is read directly when
+  one format is certain; otherwise "Which format is this file?" lists the
+  possible formats and all the others. If a file cannot be read, the error
+  banner has an **Open as…** button.
+- **Large records**: the plot draws only the part in view, about two points
+  per pixel; the Math channel and the measurements are cached. A 1-million-
+  sample CSV (2 channels) zooms at 60 frames per second in the browser.
+- File dialog: .wav, .csv, .txt and all files.
+
 ## 0.9.0 — 2026-11-07
 
 Internal restructuring, to make room for other file formats. The app works
