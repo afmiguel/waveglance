@@ -524,7 +524,7 @@ impl ScopeApp {
             // Stay open while items are ticked; close on a click outside the menu.
             let config = egui::containers::menu::MenuConfig::new()
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-            let (button, _) = egui::containers::menu::MenuButton::new("📏 Measure")
+            let (button, _) = egui::containers::menu::MenuButton::new("📏 Measure ▾")
                 .config(config)
                 .ui(ui, |ui| self.measure_menu(ui));
             button.on_hover_text("Choose the automatic measurements to show");

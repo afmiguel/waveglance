@@ -5,6 +5,10 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.2.2 — 2026-11-07
+
+- The Measure button has the ▾ arrow, like the other menus.
+
 ## 0.2.1 — 2026-11-07
 
 - A hidden channel's readout is only grey; the "(hidden)" text is gone.
