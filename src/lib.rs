@@ -1,6 +1,7 @@
 //! FNIRSI DPOX180H waveform viewer (desktop and WebAssembly).
 
 pub mod app;
+pub mod cursors;
 pub mod parser;
 
 pub use app::ScopeApp;

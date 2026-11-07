@@ -1,8 +1,9 @@
 //! Oscilloscope-style user interface.
 
+use crate::cursors::{self, CursorMode, Cursors};
 use crate::parser::{self, Acquisition, Waveform};
 use eframe::egui::{self, Color32, RichText};
-use egui_plot::{HoverPosition, Legend, Line, LineStyle, Plot, PlotPoint, VLine};
+use egui_plot::{HoverPosition, Legend, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
 use std::ops::RangeInclusive;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -47,6 +48,11 @@ pub struct ScopeApp {
     load_count: u64,
     /// Fit requested by a button, applied on the next plot frame.
     pending_fit: Option<Fit>,
+    /// Measurement cursors.
+    cursors: Cursors,
+    /// Plot transform of the last frame, to find the cursor under the pointer
+    /// before the plot is built.
+    last_transform: Option<PlotTransform>,
     /// File reads finish here (they are asynchronous on the web).
     inbox_tx: Sender<Loaded>,
     inbox_rx: Receiver<Loaded>,
@@ -71,6 +77,8 @@ impl ScopeApp {
             error: None,
             load_count: 0,
             pending_fit: None,
+            cursors: Cursors::default(),
+            last_transform: None,
             inbox_tx,
             inbox_rx,
         }
@@ -91,6 +99,17 @@ impl ScopeApp {
                 self.waveform = Some(w);
                 self.error = None;
                 self.load_count += 1;
+                // New file: cursors at 1/4 and 3/4 of the waveform.
+                let channels = [
+                    self.channel_1_data.as_slice(),
+                    self.channel_2_data.as_slice(),
+                ];
+                if let Some(time) = time_span(&channels)
+                    && let Some(volts) = voltage_span_in(&channels, &time)
+                {
+                    self.cursors.place_in(&time, &volts);
+                }
+                self.last_transform = None;
             }
             Err(e) => self.error = Some(format!("{name}: {e}")),
         }
@@ -205,6 +224,21 @@ impl ScopeApp {
                     self.pending_fit = Some(fit);
                 }
             }
+            ui.separator();
+            ui.label("Cursors:");
+            let mut mode = self.cursors.mode;
+            for (label, m) in [
+                ("Off", CursorMode::Off),
+                ("Time", CursorMode::Time),
+                ("Volt", CursorMode::Volt),
+                ("Both", CursorMode::Both),
+            ] {
+                ui.add_enabled_ui(loaded, |ui| ui.selectable_value(&mut mode, m, label));
+            }
+            if mode != self.cursors.mode {
+                self.cursors.set_mode(mode);
+            }
+            ui.separator();
             if let Some(name) = &self.file_name {
                 ui.label(RichText::new(name).monospace());
             }
@@ -255,6 +289,47 @@ impl ScopeApp {
         });
     }
 
+    /// Cursor readouts: positions, differences and channel values at T1/T2.
+    fn cursor_readout(&self, ui: &mut egui::Ui) {
+        let c = &self.cursors;
+        if c.mode.shows_time() {
+            ui.horizontal_wrapped(|ui| {
+                let color = cursors::TIME_COLOR;
+                readout(ui, "T1", Some(si(c.t[0], "s")), color);
+                readout(ui, "T2", Some(si(c.t[1], "s")), color);
+                readout(ui, "ΔT", Some(si(c.delta_t(), "s")), color);
+                readout(
+                    ui,
+                    "1/ΔT",
+                    Some(c.frequency().map_or("—".to_owned(), |f| si(f, "Hz"))),
+                    color,
+                );
+                for (name, data, color) in [
+                    ("CH1", &self.channel_1_data, CH1_COLOR),
+                    ("CH2", &self.channel_2_data, CH2_COLOR),
+                ] {
+                    if data.is_empty() {
+                        continue;
+                    }
+                    let at = |t| cursors::value_at(data, t);
+                    let fmt = |v: Option<f64>| v.map_or("—".to_owned(), |v| si(v, "V"));
+                    let (a, b) = (at(c.t[0]), at(c.t[1]));
+                    let delta = a.zip(b).map(|(a, b)| b - a);
+                    let text = format!("@T1 {}  @T2 {}  Δ {}", fmt(a), fmt(b), fmt(delta));
+                    readout(ui, name, Some(text), color);
+                }
+            });
+        }
+        if c.mode.shows_volt() {
+            ui.horizontal_wrapped(|ui| {
+                let color = cursors::VOLT_COLOR;
+                readout(ui, "V1", Some(si(c.v[0], "V")), color);
+                readout(ui, "V2", Some(si(c.v[1], "V")), color);
+                readout(ui, "ΔV", Some(si(c.delta_v(), "V")), color);
+            });
+        }
+    }
+
     fn scope_screen(&mut self, ui: &mut egui::Ui) {
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         if self.waveform.is_none() || hovering {
@@ -270,7 +345,12 @@ impl ScopeApp {
         }
 
         let fit = self.pending_fit.take();
-        Plot::new(("scope", self.load_count))
+        // Near a cursor line, a drag moves the cursor instead of the plot.
+        let allow_pan = self
+            .cursors
+            .handle_pointer(ui.ctx(), self.last_transform.as_ref());
+        let response = Plot::new(("scope", self.load_count))
+            .allow_drag(allow_pan)
             .show_grid(true)
             .grid_color(GRID_COLOR)
             .legend(Legend::default())
@@ -332,6 +412,9 @@ impl ScopeApp {
                         plot.set_plot_bounds_y(volts);
                     }
                 }
+                self.cursors.place_pending(&plot.plot_bounds());
+                self.cursors.update_drag(plot);
+                self.cursors.draw(plot);
                 plot.vline(
                     VLine::new("Trigger", 0.0)
                         .color(TRIGGER_COLOR)
@@ -352,6 +435,7 @@ impl ScopeApp {
                     );
                 }
             });
+        self.last_transform = Some(response.transform);
     }
 }
 
@@ -363,6 +447,9 @@ impl eframe::App for ScopeApp {
 
         egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui));
         egui::Panel::bottom("osd").show(ui, |ui| self.osd(ui));
+        if self.waveform.is_some() && self.cursors.mode != CursorMode::Off {
+            egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).fill(Color32::BLACK))
             .show(ui, |ui| self.scope_screen(ui));

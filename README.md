@@ -13,6 +13,9 @@ the scope state: settings, a small screen thumbnail and the raw ADC samples.
 - Drag: pan. Double-click: reset the view.
 - **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
   the first and last instant shown. **Fit both**: Fit H, then Fit V.
+- **Cursors** (Off / Time / Volt / Both): drag a dashed cursor line to move it.
+  Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
+  (linear interpolation). Voltage cursors show V1, V2 and ΔV.
 - The time axis has the trigger at t = 0. The voltage axis is in volts at the
   probe tip (the V/div that the scope shows already includes the probe setting).
 
