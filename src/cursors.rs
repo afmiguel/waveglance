@@ -61,6 +61,11 @@ pub struct Cursors {
     place_time: bool,
     /// Voltage cursors must be placed in the visible area on the next frame.
     place_volt: bool,
+    /// The time cursors have a position (from a file load or a placement).
+    /// Then a mode change keeps them where they are.
+    time_set: bool,
+    /// The voltage cursors have a position.
+    volt_set: bool,
 }
 
 impl Default for Cursors {
@@ -72,6 +77,8 @@ impl Default for Cursors {
             dragging: None,
             place_time: false,
             place_volt: false,
+            time_set: false,
+            volt_set: false,
         }
     }
 }
@@ -83,11 +90,12 @@ fn quarters(range: &RangeInclusive<f64>) -> [f64; 2] {
 }
 
 impl Cursors {
-    /// Change the mode. Cursors that become visible are placed in the
-    /// visible area on the next frame.
+    /// Change the mode. Cursors keep their positions when they are hidden
+    /// and shown again. Only cursors that never had a position are placed in
+    /// the visible area on the next frame.
     pub fn set_mode(&mut self, mode: CursorMode) {
-        self.place_time |= mode.shows_time() && !self.mode.shows_time();
-        self.place_volt |= mode.shows_volt() && !self.mode.shows_volt();
+        self.place_time |= mode.shows_time() && !self.time_set;
+        self.place_volt |= mode.shows_volt() && !self.volt_set;
         self.mode = mode;
         self.dragging = None;
     }
@@ -98,6 +106,8 @@ impl Cursors {
         self.v = quarters(volts);
         self.place_time = false;
         self.place_volt = false;
+        self.time_set = true;
+        self.volt_set = true;
         self.dragging = None;
     }
 
@@ -106,10 +116,12 @@ impl Cursors {
         if self.place_time {
             self.t = quarters(&visible.range_x());
             self.place_time = false;
+            self.time_set = true;
         }
         if self.place_volt {
             self.v = quarters(&visible.range_y());
             self.place_volt = false;
+            self.volt_set = true;
         }
     }
 
@@ -308,26 +320,35 @@ mod tests {
     }
 
     #[test]
-    fn mode_change_places_only_new_cursors() {
+    fn unplaced_cursors_go_to_the_visible_area() {
         let mut c = Cursors::default();
-        c.place_in(&(0.0..=4.0), &(0.0..=4.0));
         c.set_mode(CursorMode::Time);
         let visible = PlotBounds::from_min_max([100.0, 100.0], [104.0, 104.0]);
         c.place_pending(&visible);
         assert_eq!(c.t, [101.0, 103.0]);
-        assert_eq!(
-            c.v,
-            [1.0, 3.0],
-            "voltage cursors are not shown, so they stay"
-        );
-        c.t = [102.0, 102.5];
         c.set_mode(CursorMode::Both);
         c.place_pending(&visible);
-        assert_eq!(
-            c.t,
-            [102.0, 102.5],
-            "time cursors were already shown, so they stay"
-        );
         assert_eq!(c.v, [101.0, 103.0]);
+    }
+
+    #[test]
+    fn mode_change_keeps_cursor_positions() {
+        let mut c = Cursors::default();
+        c.place_in(&(0.0..=4.0), &(0.0..=4.0));
+        c.t = [0.5, 0.7];
+        c.v = [2.2, 3.3];
+        let visible = PlotBounds::from_min_max([100.0, 100.0], [104.0, 104.0]);
+        for mode in [
+            CursorMode::Time,
+            CursorMode::Volt,
+            CursorMode::Off,
+            CursorMode::Both,
+            CursorMode::Time,
+        ] {
+            c.set_mode(mode);
+            c.place_pending(&visible);
+            assert_eq!(c.t, [0.5, 0.7], "{mode:?}");
+            assert_eq!(c.v, [2.2, 3.3], "{mode:?}");
+        }
     }
 }
