@@ -1,0 +1,5 @@
+[build]
+target = "index.html"
+
+# For GitHub Pages under /<repo>/, build with:
+#   trunk build --release --public-url /fnirsi-viewer/
