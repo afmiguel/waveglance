@@ -25,6 +25,8 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - **◐ White / ◐ Black**: white screen with darker colours, for printing.
 - Keyboard: Ctrl/⌘+O open, F1 help, F/H/V fit, Z zoom view, S FFT, Y volts/div,
   C cursors, Tab + arrows move a cursor, 1/2 hide a channel, +/− zoom, arrows pan.
+- Mouse wheel on the CH1 / CH2 readout: V/div of that channel (1-2-5 steps,
+  Div mode; * = not the file's V/div).
 - Drag a ground marker (1▶, 2▶) to move that channel (this switches Y to Div,
   where each channel has its own scale).
 - The welcome screen lists all the controls. The **? Help** button has the main instructions.

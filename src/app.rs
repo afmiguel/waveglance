@@ -29,6 +29,8 @@ const MEASURE_KEY: &str = "measure";
 const HIDE_SPLASH_KEY: &str = "hide_splash";
 /// Storage key of the screen theme (white background).
 const LIGHT_THEME_KEY: &str = "light_theme";
+/// Mouse wheel distance (points) for one V/div step on a channel readout.
+const VDIV_WHEEL_STEP: f32 = 40.0;
 /// Storage key of the Math channel.
 const MATH_KEY: &str = "math";
 /// Storage key of the FFT settings.
@@ -278,6 +280,11 @@ pub struct ScopeApp {
     ground_shift: [f64; 2],
     /// The ground marker that the pointer is dragging (0 = CH1, 1 = CH2).
     marker_drag: Option<usize>,
+    /// Div mode: V/div chosen by the user for each channel (mouse wheel on
+    /// the channel readout), instead of the V/div of the file.
+    vdiv_override: [Option<f64>; 2],
+    /// Mouse wheel distance not yet used for a V/div step.
+    vdiv_wheel: f32,
     /// Reference waveform (file name, waveform), drawn faint behind the traces.
     reference: Option<(String, Waveform)>,
     /// Show the reference waveform.
@@ -378,6 +385,8 @@ impl ScopeApp {
             light_theme,
             ground_shift: [0.0; 2],
             marker_drag: None,
+            vdiv_override: [None; 2],
+            vdiv_wheel: 0.0,
             tab_presses: 0,
             reference: None,
             show_reference: true,
@@ -416,6 +425,7 @@ impl ScopeApp {
                 self.load_count += 1;
                 self.ground_shift = [0.0; 2];
                 self.marker_drag = None;
+                self.vdiv_override = [None; 2];
                 // New file: cursors at 1/4 and 3/4 of the waveform.
                 let [d1, d2] = self.plot_data();
                 let channels = [d1.as_slice(), d2.as_slice()];
@@ -446,6 +456,11 @@ impl ScopeApp {
                 .map(|c| match self.y_axis {
                     YAxis::Divisions => {
                         let mut m = YMap::divisions(c);
+                        // A V/div set by the user changes the size of the
+                        // trace; the ground marker stays where it is.
+                        if let Some(v) = self.vdiv_override[i] {
+                            m.scale = 1.0 / v;
+                        }
                         m.offset += self.ground_shift[i];
                         m
                     }
@@ -668,14 +683,15 @@ impl ScopeApp {
             self.set_y_axis(y_axis);
             ui.close();
         }
-        if self.ground_shift != [0.0; 2] {
+        if self.ground_shift != [0.0; 2] || self.vdiv_override != [None; 2] {
             ui.separator();
             if ui
-                .button("Reset channel positions")
-                .on_hover_text("Put the ground markers back where the scope had them")
+                .button("Reset channel positions and scales")
+                .on_hover_text("Put the ground markers and the V/div back as the scope had them")
                 .clicked()
             {
                 self.ground_shift = [0.0; 2];
+                self.vdiv_override = [None; 2];
                 ui.close();
             }
         }
@@ -1392,9 +1408,40 @@ impl ScopeApp {
                     readout(ui, name, None, color);
                     continue;
                 };
-                let text = format!("{}/div{probe}", si(vdiv, "V"));
-                if channel_button(ui, name, &text, color, self.visible[i]).clicked() {
+                // In Div mode a V/div chosen with the wheel replaces the file
+                // value; a "*" marks it.
+                let shown = match (self.y_axis, self.vdiv_override[i]) {
+                    (YAxis::Divisions, Some(v)) => v,
+                    _ => vdiv,
+                };
+                let star = if shown == vdiv { "" } else { "*" };
+                let text = format!("{}/div{star}{probe}", si(shown, "V"));
+                let response = channel_button(ui, name, &text, color, self.visible[i]).on_hover_text(
+                    format!(
+                        "Mouse wheel: V/div of {name} (1-2-5 steps; switches Y to Div). In the file: {}/div.",
+                        si(vdiv, "V")
+                    ),
+                );
+                if response.clicked() {
                     self.visible[i] = !self.visible[i];
+                }
+                // Mouse wheel on the readout: the V/div knob of the channel.
+                if response.hovered() {
+                    let amount = ui.input(|inp| {
+                        let d = wheel_delta(inp);
+                        d.x + d.y
+                    });
+                    self.vdiv_wheel += amount;
+                    if self.vdiv_wheel.abs() >= VDIV_WHEEL_STEP {
+                        // Wheel up: smaller V/div (a larger trace), like turning the knob right.
+                        let finer = self.vdiv_wheel > 0.0;
+                        self.vdiv_wheel = 0.0;
+                        if self.y_axis != YAxis::Divisions {
+                            self.set_y_axis(YAxis::Divisions);
+                        }
+                        let next = vdiv_step(shown, finer);
+                        self.vdiv_override[i] = if (next - vdiv).abs() < vdiv * 1e-9 { None } else { Some(next) };
+                    }
                 }
             }
             readout(ui, "H", self.timebase.map(|t| format!("{}/div", si(t, "s"))), palette::fg());
@@ -2805,7 +2852,8 @@ fn help_text(ui: &mut egui::Ui) {
         &[
             "Volts: one voltage axis for both channels.",
             "Div: like the scope screen, 8 divisions. Each channel uses its own V/div and starts from its ground marker.",
-            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel. Drag a marker to move that channel up or down. This needs Y: Div (each channel has its own scale); a drag in Volts mode switches to Div. Y ▾ → Reset channel positions puts them back.",
+            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel. Drag a marker to move that channel up or down. This needs Y: Div (each channel has its own scale); a drag in Volts mode switches to Div.",
+            "Mouse wheel on the CH1 or CH2 readout (bottom bar): the V/div of that channel, in 1-2-5 steps, like the V/div knob (switches to Div). A * marks a V/div that is not the one in the file. Y ▾ → Reset channel positions and scales puts everything back.",
             "The orange T on the top edge is the trigger (t = 0).",
         ],
     );
@@ -2929,6 +2977,30 @@ fn toolbar_menu(
         contents(ui);
     });
     response.on_hover_text(tip);
+}
+
+/// The next V/div in the 1-2-5 sequence (1 mV … 500 V): smaller if
+/// `finer`, else larger. A value outside the sequence (2.5 V on the 1013D)
+/// goes to the nearest step in that direction.
+pub fn vdiv_step(v: f64, finer: bool) -> f64 {
+    let steps: Vec<f64> = (-3..=2)
+        .flat_map(|e| [1.0, 2.0, 5.0].map(|m| m * 10f64.powi(e)))
+        .collect();
+    let eps = v * 1e-9;
+    if finer {
+        steps
+            .iter()
+            .rev()
+            .copied()
+            .find(|&s| s < v - eps)
+            .unwrap_or(steps[0])
+    } else {
+        steps
+            .iter()
+            .copied()
+            .find(|&s| s > v + eps)
+            .unwrap_or(steps[steps.len() - 1])
+    }
 }
 
 /// Name of a cursor mode, for the menu.
@@ -3224,7 +3296,9 @@ pub fn si_bare(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Axis, YMap, axis_zone, decimate, fmt_sig, si, time_span, voltage_span_in};
+    use super::{
+        Axis, YMap, axis_zone, decimate, fmt_sig, si, time_span, vdiv_step, voltage_span_in,
+    };
     use eframe::egui::{Rect, pos2};
 
     #[test]
@@ -3274,6 +3348,21 @@ mod tests {
         assert!(d.contains(&[4321.0, 9.0]), "the spike stays");
         assert!(d.windows(2).all(|w| w[0][0] <= w[1][0]), "time order");
         assert_eq!(decimate(&pts[..50], 100).len(), 50, "short input unchanged");
+    }
+
+    #[test]
+    fn vdiv_steps() {
+        assert_eq!(vdiv_step(1.0, true), 0.5);
+        assert_eq!(vdiv_step(0.5, true), 0.2);
+        assert_eq!(vdiv_step(0.2, false), 0.5);
+        assert_eq!(
+            vdiv_step(2.5, true),
+            2.0,
+            "1013D 2.5 V/div: to the next step"
+        );
+        assert_eq!(vdiv_step(2.5, false), 5.0);
+        assert_eq!(vdiv_step(0.001, true), 0.001, "lowest step");
+        assert_eq!(vdiv_step(500.0, false), 500.0, "highest step");
     }
 
     #[test]

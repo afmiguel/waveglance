@@ -5,6 +5,13 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.8.0 — 2026-11-07
+
+- V/div of each channel: mouse wheel on the CH1 or CH2 readout (bottom bar)
+  changes its V/div in 1-2-5 steps, like the V/div knob (switches Y to Div).
+  A * marks a V/div that is not the one in the file; the measurements do not
+  change. Y ▾ → Reset channel positions and scales puts everything back.
+
 ## 0.7.0 — 2026-11-07
 
 - **Σ Math ▾**: CH1 + CH2, CH1 − CH2 or CH2 − CH1, sample by sample. The
