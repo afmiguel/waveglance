@@ -36,7 +36,12 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
     spacing) are ignored.
   - With an amplitude below 0.1 division, the signal is taken as noise and
     the time measurements show "—".
-- The time axis has the trigger at t = 0. The voltage axis is in volts at the
+- Readouts use 4 significant digits, and never more resolution than the
+  samples have (one ADC code for voltages; Rise/Fall shorter than 2 samples
+  show "<…"). If the signal is clipped in the measured window, its voltage
+  measurements are orange and start with "?": the real value can be larger.
+- If a file cannot be opened, a banner says why; the file shown before stays.
+- The time axis has the trigger at t = 0 (the "T" marker on the top edge). The voltage axis is in volts at the
   probe tip (the V/div that the scope shows already includes the probe setting).
 
 ## Build and run

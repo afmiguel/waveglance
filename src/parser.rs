@@ -211,6 +211,9 @@ pub struct Channel {
     pub ground_adc: f64,
     /// ADC codes per vertical division.
     pub counts_per_div: f64,
+    /// Highest ADC code. Codes 0 and `code_max` are at the limit of the
+    /// input range (the signal is clipped).
+    pub code_max: u16,
     /// Input coupling, if the file stores it.
     pub coupling: Option<Coupling>,
     /// Raw ADC samples, as stored in the file.
@@ -223,6 +226,26 @@ pub struct Channel {
 }
 
 impl Channel {
+    /// Smallest voltage step: one ADC code, in volts.
+    pub fn lsb_volts(&self) -> f64 {
+        self.volts_per_div / self.counts_per_div
+    }
+
+    /// Time between two plotted samples, in seconds.
+    pub fn sample_interval(&self) -> Option<f64> {
+        let p = self.points.get(..2)?;
+        Some(p[1][0] - p[0][0])
+    }
+
+    /// True if a plotted sample with a time inside `window` is at the limit
+    /// of the input range.
+    pub fn clipped_in(&self, window: &std::ops::RangeInclusive<f64>) -> bool {
+        self.points
+            .iter()
+            .zip(&self.raw)
+            .any(|(p, &code)| window.contains(&p[0]) && (code == 0 || code >= self.code_max))
+    }
+
     /// Convert one ADC code to volts.
     pub fn adc_to_volts(&self, adc: u16) -> f64 {
         (f64::from(adc) - self.ground_adc) / self.counts_per_div * self.volts_per_div
@@ -436,6 +459,7 @@ fn build_channel(
         probe_factor: 1.0,
         ground_adc,
         counts_per_div: ADC_COUNTS_PER_DIV,
+        code_max: ADC_MAX,
         coupling: None,
         raw,
         points: Vec::new(),

@@ -4,7 +4,7 @@ use crate::cursors::{self, CursorMode, Cursors};
 use crate::measure::{self, Measurement, Unit};
 use crate::parser::{self, Acquisition, Waveform};
 use eframe::egui::{self, Color32, RichText};
-use egui_plot::{HoverPosition, Legend, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
+use egui_plot::{HoverPosition, Line, LineStyle, Plot, PlotPoint, PlotTransform, VLine};
 use std::ops::RangeInclusive;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -13,6 +13,15 @@ const CH2_COLOR: Color32 = Color32::from_rgb(0, 230, 255); // bright cyan
 const TRIGGER_COLOR: Color32 = Color32::from_rgb(255, 140, 0);
 const SCREEN_BG: Color32 = Color32::from_rgb(10, 10, 10);
 const GRID_COLOR: Color32 = Color32::from_rgb(90, 90, 90);
+/// Readouts of a channel that is off, and other inactive text.
+const OFF_COLOR: Color32 = Color32::from_rgb(110, 110, 110);
+/// Measurements that a clipped signal makes unreliable.
+const WARN_COLOR: Color32 = Color32::from_rgb(255, 150, 60);
+const ERROR_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
+/// Below this width (points), the top bar uses compact menus.
+const NARROW_WIDTH: f32 = 600.0;
+/// Significant digits of the measurement and cursor readouts.
+const READOUT_DIGITS: i32 = 4;
 /// Screen points for one wheel "line" (one notch of a mouse wheel on desktop).
 /// A browser sends about 100 points per notch.
 const WHEEL_LINE_POINTS: f32 = 50.0;
@@ -129,19 +138,44 @@ impl ScopeApp {
                 }
                 self.last_transform = None;
             }
-            Err(e) => self.error = Some(format!("{name}: {e}")),
+            Err(e) => {
+                self.report_open_error(&name, &e.to_string());
+                return;
+            }
         }
         self.file_name = Some(name);
+    }
+
+    /// A file could not be opened. The file shown before (if any) stays, and
+    /// the message says so, so that its data is not taken for the new file.
+    fn report_open_error(&mut self, name: &str, error: &str) {
+        let still = match &self.file_name {
+            Some(shown) if self.waveform.is_some() => format!(" Still showing {shown}."),
+            _ => String::new(),
+        };
+        self.error = Some(format!("Could not open {name}: {error}.{still}"));
+    }
+
+    /// The error banner below the top bar, with a button to close it.
+    fn error_banner(&mut self, ui: &mut egui::Ui) {
+        let Some(err) = &self.error else { return };
+        let mut close = false;
+        ui.horizontal(|ui| {
+            if ui.button("✕").on_hover_text("Close this message").clicked() {
+                close = true;
+            }
+            ui.add(egui::Label::new(RichText::new(format!("⚠ {err}")).color(ERROR_COLOR)).wrap());
+        });
+        if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.error = None;
+        }
     }
 
     fn receive_loaded_files(&mut self) {
         while let Ok((name, result)) = self.inbox_rx.try_recv() {
             match result {
                 Ok(bytes) => self.load_bytes(name, &bytes),
-                Err(e) => {
-                    self.error = Some(format!("{name}: {e}"));
-                    self.file_name = Some(name);
-                }
+                Err(e) => self.report_open_error(&name, &e),
             }
         }
     }
@@ -218,47 +252,32 @@ impl ScopeApp {
             };
             ui.label(RichText::new(title).strong().color(Color32::LIGHT_GRAY))
                 .on_hover_text("Supported: DPOX180H, 1013D and 1014D (original firmware)");
-            ui.separator();
-            if ui.button("📂 Open file…").clicked() {
+            ui.add_space(8.0);
+            if ui
+                .button("📂 Open file…")
+                .on_hover_text("Open a FNIRSI .wav file (or drop it on the window)")
+                .clicked()
+            {
                 self.open_file_dialog(ui.ctx());
             }
             let loaded = self.waveform.is_some();
-            for (label, fit, tip) in [
-                ("⬌ Fit H", Fit::Horizontal, "Show the full time span"),
-                (
-                    "⬍ Fit V",
-                    Fit::Vertical,
-                    "Fit the voltage axis to the samples between the first and last instant shown",
-                ),
-                (
-                    "⛶ Fit both",
-                    Fit::Both,
-                    "Full time span, then fit the voltage axis",
-                ),
-            ] {
-                if ui
-                    .add_enabled(loaded, egui::Button::new(label))
-                    .on_hover_text(tip)
-                    .clicked()
-                {
-                    self.pending_fit = Some(fit);
-                }
+            // Narrow window (phone): Fit and Cursors go into menus.
+            let narrow = ui.ctx().content_rect().width() < NARROW_WIDTH;
+            if narrow {
+                ui.add_enabled_ui(loaded, |ui| {
+                    ui.menu_button("Fit ▾", |ui| self.fit_buttons(ui));
+                });
+                ui.add_enabled_ui(loaded, |ui| {
+                    ui.menu_button("Cursors ▾", |ui| self.cursor_mode_buttons(ui));
+                });
+            } else {
+                ui.add_space(8.0);
+                ui.add_enabled_ui(loaded, |ui| self.fit_buttons(ui));
+                ui.add_space(8.0);
+                ui.label("Cursors:");
+                ui.add_enabled_ui(loaded, |ui| self.cursor_mode_buttons(ui));
             }
-            ui.separator();
-            ui.label("Cursors:");
-            let mut mode = self.cursors.mode;
-            for (label, m) in [
-                ("Off", CursorMode::Off),
-                ("Time", CursorMode::Time),
-                ("Volt", CursorMode::Volt),
-                ("Both", CursorMode::Both),
-            ] {
-                ui.add_enabled_ui(loaded, |ui| ui.selectable_value(&mut mode, m, label));
-            }
-            if mode != self.cursors.mode {
-                self.cursors.set_mode(mode);
-            }
-            ui.separator();
+            ui.add_space(8.0);
             // Always enabled: the choice can be made before a file is loaded.
             // Stay open while items are ticked; close on a click outside the menu.
             let config = egui::containers::menu::MenuConfig::new()
@@ -267,14 +286,50 @@ impl ScopeApp {
                 .config(config)
                 .ui(ui, |ui| self.measure_menu(ui));
             button.on_hover_text("Choose the automatic measurements to show");
-            ui.separator();
+            ui.add_space(8.0);
             if let Some(name) = &self.file_name {
                 ui.label(RichText::new(name).monospace());
             }
-            if let Some(err) = &self.error {
-                ui.label(RichText::new(format!("⚠ {err}")).color(Color32::from_rgb(255, 90, 90)));
-            }
         });
+    }
+
+    /// The three Fit buttons.
+    fn fit_buttons(&mut self, ui: &mut egui::Ui) {
+        for (label, fit, tip) in [
+            ("⬌ Fit H", Fit::Horizontal, "Show the full time span"),
+            (
+                "⬍ Fit V",
+                Fit::Vertical,
+                "Fit the voltage axis to the samples between the first and last instant shown",
+            ),
+            (
+                "⛶ Fit both",
+                Fit::Both,
+                "Full time span, then fit the voltage axis",
+            ),
+        ] {
+            if ui.button(label).on_hover_text(tip).clicked() {
+                self.pending_fit = Some(fit);
+                ui.close();
+            }
+        }
+    }
+
+    /// The cursor mode selector: Off / Time / Volt / Both.
+    fn cursor_mode_buttons(&mut self, ui: &mut egui::Ui) {
+        let mut mode = self.cursors.mode;
+        for (label, m, tip) in [
+            ("Off", CursorMode::Off, "No cursors"),
+            ("Time", CursorMode::Time, "Time cursors T1 and T2"),
+            ("Volt", CursorMode::Volt, "Voltage cursors V1 and V2"),
+            ("Both", CursorMode::Both, "Time and voltage cursors"),
+        ] {
+            ui.selectable_value(&mut mode, m, label).on_hover_text(tip);
+        }
+        if mode != self.cursors.mode {
+            self.cursors.set_mode(mode);
+            ui.close();
+        }
     }
 
     /// On-screen display: the digital readouts of the scope.
@@ -318,28 +373,43 @@ impl ScopeApp {
                 .map(|(n, _)| *n)
                 .collect();
             if !clipped.is_empty() {
-                ui.label(RichText::new(format!("⚠ {} clipped", clipped.join(", "))).color(Color32::from_rgb(255, 90, 90)));
+                ui.label(RichText::new(format!("⚠ {} clipped", clipped.join(", "))).color(ERROR_COLOR))
+                    .on_hover_text("The signal reaches the limit of the input range: amplitude measurements are marked with \"?\"");
             }
             for warning in &w.warnings {
                 ui.label(RichText::new(format!("⚠ {warning}")).color(Color32::from_rgb(255, 180, 0)));
             }
             // A normal wrapped label: it goes to the next line on a narrow window
             // instead of overlapping the readouts.
-            ui.label(
-                RichText::new("wheel: zoom (shift: time, alt: volts) · wheel on an axis: pan · drag: pan · double-click: reset")
-                    .small()
-                    .color(Color32::GRAY),
-            );
+            let hint = if ui.input(|i| i.any_touches()) {
+                "pinch: zoom · drag: pan · double-tap: reset"
+            } else {
+                "wheel: zoom (shift: time, alt: volts) · wheel on an axis: pan · drag: pan · double-click: reset"
+            };
+            ui.label(RichText::new(hint).small().color(Color32::from_rgb(150, 150, 150)));
         });
     }
 
     /// Contents of the "Measure" menu.
     fn measure_menu(&mut self, ui: &mut egui::Ui) {
+        // A channel that is off in the loaded file cannot be measured.
+        let present = self
+            .waveform
+            .as_ref()
+            .map_or([true, true], |w| [w.ch1.is_some(), w.ch2.is_some()]);
         let m = &mut self.measure;
         ui.horizontal(|ui| {
             ui.label("Channels:");
-            ui.checkbox(&mut m.channels[0], RichText::new("CH1").color(CH1_COLOR));
-            ui.checkbox(&mut m.channels[1], RichText::new("CH2").color(CH2_COLOR));
+            for (i, (name, color)) in [("CH1", CH1_COLOR), ("CH2", CH2_COLOR)]
+                .into_iter()
+                .enumerate()
+            {
+                ui.add_enabled(
+                    present[i],
+                    egui::Checkbox::new(&mut m.channels[i], RichText::new(name).color(color)),
+                )
+                .on_disabled_hover_text(format!("{name} is off in this file"));
+            }
         });
         ui.horizontal(|ui| {
             ui.label("Samples:");
@@ -374,7 +444,11 @@ impl ScopeApp {
             if ui.button("None").clicked() {
                 m.selected.clear();
             }
-            if ui.button("Default").clicked() {
+            if ui
+                .button("Default")
+                .on_hover_text("Freq and Vpp, both channels, screen samples")
+                .clicked()
+            {
                 *m = measure::Settings::default();
             }
         });
@@ -419,6 +493,7 @@ impl ScopeApp {
                 continue;
             }
             let r = measure::measure(&ch.points, &window, MIN_AMPLITUDE_DIV * ch.volts_per_div);
+            let clipped = ch.clipped_in(&window);
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new(format!("{name} ({window_name})"))
@@ -427,19 +502,28 @@ impl ScopeApp {
                         .color(color),
                 );
                 for m in self.measure.shown() {
-                    let value = r.get(m).map_or_else(
-                        || "—".to_owned(),
-                        |v| match m.unit() {
-                            Unit::Volt => si(v, "V"),
-                            Unit::Second => si(v, "s"),
-                            Unit::Hertz => si(v, "Hz"),
-                            Unit::Percent => format!("{v:.1} %"),
-                        },
-                    );
-                    readout(ui, m.label(), Some(value), color).on_hover_text(m.description());
+                    let value = format_measurement(m, r.get(m), ch);
+                    // A clipped signal hides its real peaks: voltage values
+                    // are not reliable (the real Vpp is larger).
+                    if clipped && m.unit() == Unit::Volt {
+                        readout(ui, m.label(), Some(format!("?{value}")), WARN_COLOR).on_hover_text(
+                            format!("{}\n⚠ {name} is clipped in this window: the real value can be larger", m.description()),
+                        );
+                    } else {
+                        readout(ui, m.label(), Some(value), color).on_hover_text(m.description());
+                    }
                 }
             });
         }
+    }
+
+    /// Measurements in a scroll area, so that they never fill a small screen.
+    fn measure_panel(&self, ui: &mut egui::Ui) {
+        let max = ui.ctx().content_rect().height() * 0.25;
+        egui::ScrollArea::vertical()
+            .max_height(max)
+            .auto_shrink([false, true])
+            .show(ui, |ui| self.measure_readout(ui));
     }
 
     /// Show the measurement panel?
@@ -457,24 +541,27 @@ impl ScopeApp {
         if c.mode.shows_time() {
             ui.horizontal_wrapped(|ui| {
                 let color = cursors::TIME_COLOR;
-                readout(ui, "T1", Some(si(c.t[0], "s")), color);
-                readout(ui, "T2", Some(si(c.t[1], "s")), color);
-                readout(ui, "ΔT", Some(si(c.delta_t(), "s")), color);
+                let fmt_t = |t| fmt_sig(t, "s", READOUT_DIGITS, 0.0);
+                readout(ui, "T1", Some(fmt_t(c.t[0])), color);
+                readout(ui, "T2", Some(fmt_t(c.t[1])), color);
+                readout(ui, "ΔT", Some(fmt_t(c.delta_t())), color);
                 readout(
                     ui,
                     "1/ΔT",
-                    Some(c.frequency().map_or("—".to_owned(), |f| si(f, "Hz"))),
+                    Some(
+                        c.frequency()
+                            .map_or("—".to_owned(), |f| fmt_sig(f, "Hz", READOUT_DIGITS, 0.0)),
+                    ),
                     color,
                 );
-                for (name, data, color) in [
-                    ("CH1", &self.channel_1_data, CH1_COLOR),
-                    ("CH2", &self.channel_2_data, CH2_COLOR),
-                ] {
-                    if data.is_empty() {
-                        continue;
-                    }
-                    let at = |t| cursors::value_at(data, t);
-                    let fmt = |v: Option<f64>| v.map_or("—".to_owned(), |v| si(v, "V"));
+                let Some(w) = &self.waveform else { return };
+                for (name, ch, color) in [("CH1", &w.ch1, CH1_COLOR), ("CH2", &w.ch2, CH2_COLOR)] {
+                    let Some(ch) = ch else { continue };
+                    let at = |t| cursors::value_at(&ch.points, t);
+                    let lsb = ch.lsb_volts();
+                    let fmt = |v: Option<f64>| {
+                        v.map_or("—".to_owned(), |v| fmt_sig(v, "V", READOUT_DIGITS, lsb))
+                    };
                     let (a, b) = (at(c.t[0]), at(c.t[1]));
                     let delta = a.zip(b).map(|(a, b)| b - a);
                     let text = format!("@T1 {}  @T2 {}  Δ {}", fmt(a), fmt(b), fmt(delta));
@@ -485,9 +572,10 @@ impl ScopeApp {
         if c.mode.shows_volt() {
             ui.horizontal_wrapped(|ui| {
                 let color = cursors::VOLT_COLOR;
-                readout(ui, "V1", Some(si(c.v[0], "V")), color);
-                readout(ui, "V2", Some(si(c.v[1], "V")), color);
-                readout(ui, "ΔV", Some(si(c.delta_v(), "V")), color);
+                let fmt_v = |v| fmt_sig(v, "V", READOUT_DIGITS, 0.0);
+                readout(ui, "V1", Some(fmt_v(c.v[0])), color);
+                readout(ui, "V2", Some(fmt_v(c.v[1])), color);
+                readout(ui, "ΔV", Some(fmt_v(c.delta_v())), color);
             });
         }
     }
@@ -517,7 +605,8 @@ impl ScopeApp {
             .allow_drag(allow_pan)
             .show_grid(true)
             .grid_color(GRID_COLOR)
-            .legend(Legend::default())
+            // No legend: the OSD names the channels by colour, and a legend
+            // covers the trace.
             .x_axis_label("Time (trigger at t = 0)")
             .y_axis_label("Voltage")
             .x_axis_formatter(|mark, _| si(mark.value, "s"))
@@ -600,10 +689,14 @@ impl ScopeApp {
                 self.cursors.place_pending(&plot.plot_bounds());
                 self.cursors.update_drag(plot);
                 self.cursors.draw(plot);
+                // A faint line at the trigger time; the marker on the top edge
+                // (drawn after the plot) is the main sign. No name: no legend
+                // entry and no hover label.
                 plot.vline(
-                    VLine::new("Trigger", 0.0)
-                        .color(TRIGGER_COLOR)
-                        .style(LineStyle::Dashed { length: 6.0 }),
+                    VLine::new("", 0.0)
+                        .color(TRIGGER_COLOR.gamma_multiply(0.35))
+                        .width(1.0)
+                        .style(LineStyle::Dotted { spacing: 6.0 }),
                 );
                 if !self.channel_1_data.is_empty() {
                     plot.line(
@@ -622,6 +715,7 @@ impl ScopeApp {
             });
         self.cursors
             .update_pointer_icon(ui.ctx(), &response.transform);
+        draw_trigger_marker(ui, &response.transform);
         // The measurements use the view of the last frame: draw once more
         // when the view changes, so that they are never one frame late.
         let old_x = self.last_transform.as_ref().map(|t| t.bounds().range_x());
@@ -639,9 +733,16 @@ impl eframe::App for ScopeApp {
         self.receive_loaded_files();
 
         egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui));
-        egui::Panel::bottom("osd").show(ui, |ui| self.osd(ui));
+        if self.error.is_some() {
+            egui::Panel::top("error_banner").show(ui, |ui| self.error_banner(ui));
+        }
+        // No OSD without a file: "CH1 OFF CH2 OFF" would look like a scope
+        // that is switched off.
+        if self.waveform.is_some() {
+            egui::Panel::bottom("osd").show(ui, |ui| self.osd(ui));
+        }
         if self.shows_measurements() {
-            egui::Panel::bottom("measurements").show(ui, |ui| self.measure_readout(ui));
+            egui::Panel::bottom("measurements").show(ui, |ui| self.measure_panel(ui));
         }
         if self.waveform.is_some() && self.cursors.mode != CursorMode::Off {
             egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
@@ -740,7 +841,12 @@ fn readout(
     value: Option<String>,
     color: Color32,
 ) -> egui::Response {
-    let value = value.unwrap_or_else(|| "OFF".to_owned());
+    // A channel that is off: grey text, no box (like the dimmed label of a
+    // scope channel that is off).
+    let (value, color, stroke) = match value {
+        Some(v) => (v, color, egui::Stroke::new(1.0, color)),
+        None => ("OFF".to_owned(), OFF_COLOR, egui::Stroke::NONE),
+    };
     // One widget (not a frame around a label), so that a wrapped row moves the
     // whole box to the next line.
     let text = RichText::new(format!("{label} {value}"))
@@ -750,19 +856,117 @@ fn readout(
     ui.add(
         egui::Button::new(text)
             .fill(Color32::TRANSPARENT)
-            .stroke(egui::Stroke::new(1.0, color))
+            .stroke(stroke)
             .corner_radius(3)
             .sense(egui::Sense::hover()),
     )
 }
 
-/// Format a value with an SI prefix and unit, for example `0.2, "V"` → `200 mV`.
-pub fn si(value: f64, unit: &str) -> String {
-    format!("{}{unit}", si_bare(value))
+/// The trigger marker: a "T" in a small triangle on the top edge of the plot,
+/// at t = 0, like on a scope screen. Off screen, an arrow at the edge points to it.
+fn draw_trigger_marker(ui: &egui::Ui, transform: &PlotTransform) {
+    let frame = *transform.frame();
+    let x = transform.position_from_point_x(0.0);
+    let painter = ui.painter_at(frame.expand(1.0));
+    let top = frame.top();
+    let font = egui::FontId::monospace(10.0);
+    if x < frame.left() || x > frame.right() {
+        let (x, text) = if x < frame.left() {
+            (frame.left() + 12.0, "◀T")
+        } else {
+            (frame.right() - 12.0, "T▶")
+        };
+        painter.text(
+            egui::pos2(x, top + 2.0),
+            egui::Align2::CENTER_TOP,
+            text,
+            font,
+            TRIGGER_COLOR,
+        );
+        return;
+    }
+    let (w, h) = (7.0, 12.0);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(x - w, top),
+            egui::pos2(x + w, top),
+            egui::pos2(x, top + h),
+        ],
+        TRIGGER_COLOR,
+        egui::Stroke::NONE,
+    ));
+    painter.text(
+        egui::pos2(x, top),
+        egui::Align2::CENTER_TOP,
+        "T",
+        font,
+        Color32::BLACK,
+    );
 }
 
-/// Format a value with an SI prefix and a trailing space, for example `4e8` → `400 M`.
-pub fn si_bare(value: f64) -> String {
+/// Text of one measurement of a channel, with fixed significant digits and
+/// no more resolution than the samples have.
+fn format_measurement(m: Measurement, value: Option<f64>, ch: &parser::Channel) -> String {
+    let Some(v) = value else {
+        return "—".to_owned();
+    };
+    let dt = ch.sample_interval().unwrap_or(0.0).abs();
+    match m.unit() {
+        // Mean and RMS average many samples, so they resolve less than one code.
+        Unit::Volt => {
+            let lsb = ch.lsb_volts();
+            let res = if matches!(m, Measurement::Mean | Measurement::Rms) {
+                lsb / 10.0
+            } else {
+                lsb
+            };
+            fmt_sig(v, "V", READOUT_DIGITS, res)
+        }
+        // A rise or fall faster than 2 samples cannot be measured.
+        Unit::Second
+            if matches!(m, Measurement::RiseTime | Measurement::FallTime) && v < 2.0 * dt =>
+        {
+            format!("<{}", fmt_sig(2.0 * dt, "s", 3, 0.0))
+        }
+        Unit::Second => fmt_sig(v, "s", READOUT_DIGITS, dt / 10.0),
+        Unit::Hertz => fmt_sig(v, "Hz", READOUT_DIGITS, 0.0),
+        Unit::Percent => format!("{v:.1} %"),
+    }
+}
+
+/// Format a value with `digits` significant digits (trailing zeros kept, so
+/// the width does not jump), an SI prefix and a unit. With `resolution > 0`,
+/// the value is rounded to a multiple of it and no digit below it is shown.
+/// Examples: `fmt_sig(1000.0, "Hz", 4, 0.0)` → `1.000 kHz`;
+/// `fmt_sig(10e-6, "V", 4, 1e-3)` → `0 V`.
+pub fn fmt_sig(value: f64, unit: &str, digits: i32, resolution: f64) -> String {
+    if !value.is_finite() {
+        return "—".to_owned();
+    }
+    let mut v = value;
+    if resolution > 0.0 {
+        v = (v / resolution).round() * resolution;
+    }
+    if v == 0.0 {
+        return format!("0 {unit}");
+    }
+    // Round to `digits` significant digits first, so that the prefix fits the
+    // rounded value (999.96 → 1.000 k, not 1000.0).
+    let step = 10f64.powi(v.abs().log10().floor() as i32 - digits + 1);
+    v = (v / step).round() * step;
+    let (scale, prefix) = si_prefix(v.abs());
+    let scaled = v / scale;
+    let magnitude = scaled.abs().log10().floor() as i32;
+    let mut decimals = (digits - 1 - magnitude).max(0);
+    if resolution > 0.0 {
+        let res_decimals = (-(resolution / scale).log10() - 1e-9).ceil() as i32;
+        decimals = decimals.min(res_decimals.max(0));
+    }
+    format!("{scaled:.*} {prefix}{unit}", decimals as usize)
+}
+
+/// The SI prefix for a magnitude: (scale, prefix).
+fn si_prefix(magnitude: f64) -> (f64, &'static str) {
     const PREFIXES: [(f64, &str); 9] = [
         (1e9, "G"),
         (1e6, "M"),
@@ -774,24 +978,32 @@ pub fn si_bare(value: f64) -> String {
         (1e-12, "p"),
         (1e-15, "f"),
     ];
+    PREFIXES
+        .iter()
+        .find(|(s, _)| magnitude >= s * 0.9995)
+        .copied()
+        .unwrap_or((1e-15, "f"))
+}
+
+/// Format a value with an SI prefix and unit, for example `0.2, "V"` → `200 mV`.
+pub fn si(value: f64, unit: &str) -> String {
+    format!("{}{unit}", si_bare(value))
+}
+
+/// Format a value with an SI prefix and a trailing space, for example `4e8` → `400 M`.
+pub fn si_bare(value: f64) -> String {
     if value == 0.0 || !value.is_finite() {
         return format!("{value} ");
     }
-    let mag = value.abs();
-    let (scale, prefix) = PREFIXES
-        .iter()
-        .find(|(s, _)| mag >= s * 0.9995)
-        .copied()
-        .unwrap_or((1e-15, "f"));
-    let scaled = value / scale;
-    let text = format!("{scaled:.3}");
+    let (scale, prefix) = si_prefix(value.abs());
+    let text = format!("{:.3}", value / scale);
     let text = text.trim_end_matches('0').trim_end_matches('.');
     format!("{text} {prefix}")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Axis, axis_zone, si, time_span, voltage_span_in};
+    use super::{Axis, axis_zone, fmt_sig, si, time_span, voltage_span_in};
     use eframe::egui::{Rect, pos2};
 
     #[test]
@@ -829,6 +1041,20 @@ mod tests {
         let flat = [[0.0, 0.5], [1.0, 0.5]];
         let r = voltage_span_in(&[&flat[..]], &(0.0..=1.0)).unwrap();
         assert!(r.start() < &0.5 && r.end() > &0.5);
+    }
+
+    #[test]
+    fn fixed_significant_digits() {
+        assert_eq!(fmt_sig(1000.0, "Hz", 4, 0.0), "1.000 kHz");
+        assert_eq!(fmt_sig(99_980.0, "Hz", 4, 0.0), "99.98 kHz");
+        assert_eq!(fmt_sig(0.99996, "V", 4, 0.0), "1.000 V");
+        assert_eq!(fmt_sig(-30e-6, "s", 4, 0.0), "-30.00 µs");
+        // Resolution: 1 mV per code. Less than half a code is 0 V.
+        assert_eq!(fmt_sig(10e-6, "V", 4, 1e-3), "0 V");
+        assert_eq!(fmt_sig(-0.99e-3, "V", 4, 1e-3), "-1 mV");
+        assert_eq!(fmt_sig(0.5381, "V", 4, 1.25e-4), "538.1 mV");
+        assert_eq!(fmt_sig(1.073, "V", 4, 1.25e-4), "1.073 V");
+        assert_eq!(fmt_sig(f64::NAN, "V", 4, 0.0), "—");
     }
 
     #[test]

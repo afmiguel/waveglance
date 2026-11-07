@@ -111,6 +111,7 @@ pub fn parse(bytes: &[u8]) -> Result<Waveform, ParseError> {
             probe_factor,
             ground_adc: f64::from(zero),
             counts_per_div: COUNTS_PER_DIV,
+            code_max: CODE_MAX,
             coupling: Some(coupling),
             raw,
             points: Vec::new(),
