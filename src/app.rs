@@ -27,10 +27,17 @@ const READOUT_DIGITS: i32 = 4;
 const WHEEL_LINE_POINTS: f32 = 50.0;
 /// Wheel distance (screen points) that zooms by a factor of e.
 const WHEEL_ZOOM_POINTS: f32 = 300.0;
+/// Version of the app, from Cargo.toml.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Short git commit of the build (from build.rs).
+const GIT_HASH: &str = env!("GIT_HASH");
 /// Storage key of the measurement settings.
 const MEASURE_KEY: &str = "measure";
-/// Storage key of the vertical axis mode.
-const Y_AXIS_KEY: &str = "y_axis";
+/// Storage key of "do not show the splash screen at startup".
+const HIDE_SPLASH_KEY: &str = "hide_splash";
+/// Storage key of the vertical axis mode. ("y_axis" held the old default,
+/// Divisions, saved automatically; a new key starts everyone in Volts.)
+const Y_AXIS_KEY: &str = "y_axis_mode";
 /// Vertical divisions on the scope screen (±4 around the centre).
 const SCREEN_DIVS_Y: f64 = 8.0;
 /// A channel whose amplitude is below this many divisions is noise: no
@@ -59,9 +66,9 @@ pub enum Fit {
 pub enum YAxis {
     /// Divisions, like a scope screen: each channel uses its own V/div and
     /// ground position, so a small signal is not flat next to a large one.
-    #[default]
     Divisions,
     /// Volts at the probe tip; both channels share the axis.
+    #[default]
     Volts,
 }
 
@@ -122,6 +129,12 @@ pub struct ScopeApp {
     measure: measure::Settings,
     /// Vertical axis: divisions (per channel) or volts.
     y_axis: YAxis,
+    /// The splash screen (welcome and controls) is open.
+    splash_open: bool,
+    /// Do not open the splash screen at startup (saved).
+    hide_splash: bool,
+    /// The Help window is open.
+    help_open: bool,
     /// CH1 and CH2 shown on the screen (a click on the OSD readout hides or
     /// shows a channel, like the channel button of a scope).
     visible: [bool; 2],
@@ -148,6 +161,10 @@ impl ScopeApp {
             .storage
             .and_then(|s| eframe::get_value(s, Y_AXIS_KEY))
             .unwrap_or_default();
+        let hide_splash: bool = cc
+            .storage
+            .and_then(|s| eframe::get_value(s, HIDE_SPLASH_KEY))
+            .unwrap_or(false);
         let (inbox_tx, inbox_rx) = channel();
         Self {
             channel_1_data: Vec::new(),
@@ -163,6 +180,9 @@ impl ScopeApp {
             cursors: Cursors::default(),
             measure,
             y_axis,
+            splash_open: !hide_splash,
+            hide_splash,
+            help_open: false,
             visible: [true, true],
             last_transform: None,
             inbox_tx,
@@ -244,14 +264,14 @@ impl ScopeApp {
         self.last_transform = None;
     }
 
-    /// The Y axis selector: Div / Volts.
+    /// The Y axis selector: Volts (default) / Div.
     fn y_axis_buttons(&mut self, ui: &mut egui::Ui) {
         let mut y_axis = self.y_axis;
+        ui.selectable_value(&mut y_axis, YAxis::Volts, "Volts")
+            .on_hover_text("Vertical axis in volts: both channels share the axis");
         ui.selectable_value(&mut y_axis, YAxis::Divisions, "Div").on_hover_text(
             "Vertical axis in divisions, like the scope screen: each channel has its own V/div and ground marker",
         );
-        ui.selectable_value(&mut y_axis, YAxis::Volts, "Volts")
-            .on_hover_text("Vertical axis in volts: both channels share the axis");
         if y_axis != self.y_axis {
             self.set_y_axis(y_axis);
             ui.close();
@@ -266,6 +286,97 @@ impl ScopeApp {
             _ => String::new(),
         };
         self.error = Some(format!("Could not open {name}: {error}.{still}"));
+    }
+
+    /// The splash screen: what the app does, its version, and the controls.
+    /// "Don't show this at startup" is saved; the Help button has the full
+    /// instructions.
+    fn splash(&mut self, ctx: &egui::Context) {
+        if !self.splash_open {
+            return;
+        }
+        let mut open_file = false;
+        let modal = egui::Modal::new(egui::Id::unique("splash")).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.heading("FNIRSI Viewer");
+            ui.label(
+                RichText::new(format!("Version {VERSION} · commit {GIT_HASH}"))
+                    .small()
+                    .color(Color32::GRAY),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                "Opens the waveform files (.wav) that FNIRSI DPOX180H, 1013D and 1014D \
+                 oscilloscopes save. The files are read on this device: nothing is uploaded.",
+            );
+            ui.add_space(8.0);
+            ui.label(RichText::new("Controls").strong());
+            egui::Grid::new("splash_controls")
+                .num_columns(2)
+                .spacing([16.0, 4.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for (what, does) in [
+                        ("Mouse wheel", "Zoom (Shift: time only, Alt: volts only)"),
+                        ("Wheel on an axis", "Pan along that axis"),
+                        ("Drag", "Pan"),
+                        ("Double-click", "Reset the view"),
+                        ("Drag a dashed line", "Move a cursor (⌖ Cursors menu)"),
+                        ("Click CH1 / CH2 readout", "Hide or show the channel"),
+                        ("Touch", "Pinch: zoom · drag: pan · double-tap: reset"),
+                        ("Esc", "Close this screen or an error message"),
+                    ] {
+                        ui.label(RichText::new(what).monospace());
+                        ui.label(does);
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(8.0);
+            ui.checkbox(&mut self.hide_splash, "Don't show this at startup");
+            ui.label(
+                RichText::new("The Help button shows these controls and more.")
+                    .small()
+                    .color(Color32::GRAY),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("📂 Open file…").clicked() {
+                    open_file = true;
+                }
+                if ui.button("❓ Help").clicked() {
+                    self.splash_open = false;
+                    self.help_open = true;
+                }
+                if ui.button("Close").clicked() {
+                    self.splash_open = false;
+                }
+            });
+        });
+        if modal.should_close() {
+            self.splash_open = false;
+        }
+        if open_file {
+            self.splash_open = false;
+            self.open_file_dialog(ctx);
+        }
+    }
+
+    /// The Help window: the main instructions, in short sections.
+    fn help(&mut self, ctx: &egui::Context) {
+        let mut open = self.help_open;
+        egui::Window::new("Help")
+            .open(&mut open)
+            .default_width(480.0)
+            .default_height(ctx.content_rect().height() * 0.7)
+            .resizable(true)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, help_text);
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            open = false;
+        }
+        self.help_open = open;
     }
 
     /// The error banner below the top bar, with a button to close it.
@@ -364,6 +475,13 @@ impl ScopeApp {
             };
             ui.label(RichText::new(title).strong().color(Color32::LIGHT_GRAY))
                 .on_hover_text("Supported: DPOX180H, 1013D and 1014D (original firmware)");
+            // Version, discreet: identifies the build (also between releases).
+            ui.label(
+                RichText::new(format!("v{VERSION}"))
+                    .small()
+                    .color(Color32::from_rgb(130, 130, 130)),
+            )
+            .on_hover_text(format!("fnirsi-viewer {VERSION}, commit {GIT_HASH}"));
             ui.add_space(8.0);
             if ui
                 .button("📂 Open file…")
@@ -382,9 +500,6 @@ impl ScopeApp {
                     ui.label("Y axis:");
                     ui.horizontal(|ui| self.y_axis_buttons(ui));
                 });
-                ui.add_enabled_ui(loaded, |ui| {
-                    ui.menu_button("Cursors ▾", |ui| self.cursor_mode_buttons(ui));
-                });
             } else {
                 ui.add_space(8.0);
                 // `horizontal`: inside a wrapped row, a scope Ui is vertical.
@@ -392,12 +507,18 @@ impl ScopeApp {
                 ui.add_space(8.0);
                 ui.label("Y:");
                 self.y_axis_buttons(ui);
-                ui.add_space(8.0);
-                ui.label("Cursors:");
-                ui.add_enabled_ui(loaded, |ui| {
-                    ui.horizontal(|ui| self.cursor_mode_buttons(ui))
-                });
             }
+            ui.add_space(8.0);
+            // Cursor menu: the button shows the mode in use.
+            ui.add_enabled_ui(loaded, |ui| {
+                let label = match self.cursors.mode {
+                    CursorMode::Off => "⌖ Cursors ▾".to_owned(),
+                    m => format!("⌖ Cursors: {} ▾", cursor_mode_name(m)),
+                };
+                ui.menu_button(label, |ui| self.cursor_menu(ui))
+                    .response
+                    .on_hover_text("Measurement cursors");
+            });
             ui.add_space(8.0);
             // Always enabled: the choice can be made before a file is loaded.
             // Stay open while items are ticked; close on a click outside the menu.
@@ -407,6 +528,14 @@ impl ScopeApp {
                 .config(config)
                 .ui(ui, |ui| self.measure_menu(ui));
             button.on_hover_text("Choose the automatic measurements to show");
+            ui.add_space(8.0);
+            if ui
+                .button("❓ Help")
+                .on_hover_text("How to use the viewer: controls, cursors, measurements")
+                .clicked()
+            {
+                self.help_open = !self.help_open;
+            }
             ui.add_space(8.0);
             if let Some(name) = &self.file_name {
                 ui.label(RichText::new(name).monospace());
@@ -436,21 +565,40 @@ impl ScopeApp {
         }
     }
 
-    /// The cursor mode selector: Off / Time / Volt / Both.
-    fn cursor_mode_buttons(&mut self, ui: &mut egui::Ui) {
+    /// Contents of the "Cursors" menu: the mode (radio buttons) and an
+    /// action to bring the cursors back into view.
+    fn cursor_menu(&mut self, ui: &mut egui::Ui) {
         let mut mode = self.cursors.mode;
-        for (label, m, tip) in [
-            ("Off", CursorMode::Off, "No cursors"),
-            ("Time", CursorMode::Time, "Time cursors T1 and T2"),
-            ("Volt", CursorMode::Volt, "Voltage cursors V1 and V2"),
-            ("Both", CursorMode::Both, "Time and voltage cursors"),
+        for (m, tip) in [
+            (CursorMode::Off, "No cursors"),
+            (CursorMode::Time, "Time cursors T1 and T2 (vertical lines)"),
+            (
+                CursorMode::Volt,
+                "Voltage cursors V1 and V2 (horizontal lines)",
+            ),
+            (CursorMode::Both, "Time and voltage cursors"),
         ] {
-            ui.selectable_value(&mut mode, m, label).on_hover_text(tip);
+            ui.radio_value(&mut mode, m, cursor_mode_name(m))
+                .on_hover_text(tip);
         }
         if mode != self.cursors.mode {
             self.cursors.set_mode(mode);
             ui.close();
         }
+        ui.separator();
+        if ui
+            .add_enabled(mode != CursorMode::Off, egui::Button::new("Bring to view"))
+            .on_hover_text("Move the cursors to 1/4 and 3/4 of the screen")
+            .clicked()
+        {
+            self.cursors.bring_to_view();
+            ui.close();
+        }
+        ui.label(
+            RichText::new("Drag a dashed cursor line to move it.")
+                .small()
+                .color(Color32::GRAY),
+        );
     }
 
     /// On-screen display: the digital readouts of the scope.
@@ -517,12 +665,6 @@ impl ScopeApp {
             }
             // A normal wrapped label: it goes to the next line on a narrow window
             // instead of overlapping the readouts.
-            let hint = if ui.input(|i| i.any_touches()) {
-                "pinch: zoom · drag: pan · double-tap: reset"
-            } else {
-                "wheel: zoom (shift: time, alt: volts) · wheel on an axis: pan · drag: pan · double-click: reset"
-            };
-            ui.label(RichText::new(hint).small().color(Color32::from_rgb(150, 150, 150)));
         });
     }
 
@@ -928,6 +1070,14 @@ impl eframe::App for ScopeApp {
         let ctx = ui.ctx().clone();
         self.handle_dropped_files(&ctx);
         self.receive_loaded_files();
+        // A file was dropped or opened: the splash screen is no longer needed.
+        if self.waveform.is_some() && self.load_count == 1 && self.splash_open {
+            self.splash_open = false;
+        }
+        self.splash(&ctx);
+        if self.help_open {
+            self.help(&ctx);
+        }
 
         egui::Panel::top("top_bar").show(ui, |ui| self.top_bar(ui));
         if self.error.is_some() {
@@ -957,6 +1107,7 @@ impl eframe::App for ScopeApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, MEASURE_KEY, &self.measure);
         eframe::set_value(storage, Y_AXIS_KEY, &self.y_axis);
+        eframe::set_value(storage, HIDE_SPLASH_KEY, &self.hide_splash);
     }
 }
 
@@ -1133,6 +1284,97 @@ fn channel_button(
     )
     .on_hover_text(tip)
     .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The contents of the Help window.
+fn help_text(ui: &mut egui::Ui) {
+    let section = |ui: &mut egui::Ui, title: &str, lines: &[&str]| {
+        ui.add_space(6.0);
+        ui.label(RichText::new(title).strong().color(Color32::WHITE));
+        for line in lines {
+            ui.label(format!("• {line}"));
+        }
+    };
+    ui.label(
+        RichText::new(format!("FNIRSI Viewer {VERSION} · commit {GIT_HASH}"))
+            .small()
+            .color(Color32::GRAY),
+    );
+    section(
+        ui,
+        "Open a file",
+        &[
+            "Drop a .wav file on the window, or click 📂 Open file….",
+            "Supported: DPOX180H, and 1013D/1014D with the original FNIRSI firmware. The model is found automatically and shown at the top left.",
+            "The file is read on this device; nothing is uploaded.",
+            "If a file cannot be opened, a red banner says why, and the file shown before stays.",
+        ],
+    );
+    section(
+        ui,
+        "Move and zoom",
+        &[
+            "Mouse wheel on the plot: zoom. Shift + wheel: time only. Alt + wheel: volts only.",
+            "Mouse wheel on the time or voltage axis: move along that axis.",
+            "Drag: move. Double-click: back to the start view.",
+            "Touch: pinch to zoom, drag to move, double-tap to reset.",
+            "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both.",
+        ],
+    );
+    section(
+        ui,
+        "Vertical axis (Y: Volts / Div)",
+        &[
+            "Volts: one voltage axis for both channels.",
+            "Div: like the scope screen, 8 divisions. Each channel uses its own V/div and starts from its ground marker.",
+            "1▶ and 2▶ on the left edge: the 0 V level (ground) of each channel.",
+            "The orange T on the top edge is the trigger (t = 0).",
+        ],
+    );
+    section(
+        ui,
+        "Channels",
+        &[
+            "Click the CH1 or CH2 readout at the bottom to hide or show that channel.",
+            "The readout shows V/div, probe (1X, 10X) and, if the file has it, the coupling (DC/AC).",
+        ],
+    );
+    section(
+        ui,
+        "Cursors (⌖ Cursors menu)",
+        &[
+            "Time: two vertical lines T1, T2. Readout: T1, T2, ΔT, 1/ΔT, and each channel's voltage at T1 and T2.",
+            "Volt: two horizontal lines V1, V2. Readout: V1, V2, ΔV (in Div mode, in the volts of each channel).",
+            "Drag a dashed line to move it. Bring to view moves lost cursors back to the screen.",
+        ],
+    );
+    section(
+        ui,
+        "Measurements (📏 Measure menu)",
+        &[
+            "Tick the measurements and channels to show. The choice is saved.",
+            "Samples: Screen (the time span shown), Record (the whole file) or T1–T2 (between the time cursors).",
+            "Values have 4 significant digits and never more resolution than the samples.",
+            "?1.91 V in orange: the signal is clipped (it reaches the limit of the input range); the real value can be larger.",
+            "<4.00 µs: the edge is faster than 2 samples; only an upper limit is known.",
+            "—: the value cannot be measured (for example, fewer than two edges for a frequency).",
+        ],
+    );
+    section(
+        ui,
+        "Keyboard",
+        &["Esc: close this window, the welcome screen or an error message."],
+    );
+}
+
+/// Name of a cursor mode, for the menu.
+fn cursor_mode_name(mode: CursorMode) -> &'static str {
+    match mode {
+        CursorMode::Off => "Off",
+        CursorMode::Time => "Time",
+        CursorMode::Volt => "Volt",
+        CursorMode::Both => "Both",
+    }
 }
 
 /// Ground markers on the left edge of the plot, like on a scope screen: a

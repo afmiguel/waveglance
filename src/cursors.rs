@@ -100,6 +100,13 @@ impl Cursors {
         self.dragging = None;
     }
 
+    /// Move the visible cursors to 1/4 and 3/4 of the visible area on the
+    /// next frame (for cursors that are off screen after a zoom or pan).
+    pub fn bring_to_view(&mut self) {
+        self.place_time |= self.mode.shows_time();
+        self.place_volt |= self.mode.shows_volt();
+    }
+
     /// Put the cursors at 1/4 and 3/4 of the given ranges (used for a new file).
     pub fn place_in(&mut self, time: &RangeInclusive<f64>, volts: &RangeInclusive<f64>) {
         self.t = quarters(time);

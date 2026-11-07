@@ -17,17 +17,19 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 ## Use
 
 - Drop a `.wav` file on the window, or click **Open file…**.
+- The welcome screen lists all the controls. The **❓ Help** button has the main instructions.
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Mouse wheel over a time or voltage axis: pan along that axis.
 - Drag: pan. Double-click: reset the view.
-- **Y: Div / Volts**. *Div* (default) is like the scope screen: 8 divisions,
-  each channel drawn with its own V/div from its ground marker (**1▶**, **2▶**
-  on the left edge). *Volts*: one voltage axis for both channels.
+- **Y: Volts / Div**. *Volts* (default): one voltage axis for both channels.
+  *Div* is like the scope screen: 8 divisions, each channel drawn with its own
+  V/div from its ground marker (**1▶**, **2▶** on the left edge).
 - Click the **CH1** or **CH2** readout at the bottom to hide or show that
   channel (its trace, ground marker, measurements and cursor values).
 - **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
   the first and last instant shown. **Fit both**: Fit H, then Fit V.
-- **Cursors** (Off / Time / Volt / Both): drag a dashed cursor line to move it.
+- **⌖ Cursors** menu (Off / Time / Volt / Both, and *Bring to view*): drag a
+  dashed cursor line to move it.
   Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
   (linear interpolation). Voltage cursors show V1, V2 and ΔV.
 - **📏 Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
@@ -71,6 +73,13 @@ trunk build --release --public-url /fnirsi-viewer/
 
 Then publish the `dist/` folder. The workflow `.github/workflows/pages.yml` does
 this on each push to `main`.
+
+## Versions
+
+See [CHANGELOG.md](CHANGELOG.md). The version is in `Cargo.toml`. The app shows
+it next to the title (hover it for the git commit), so each build can be
+identified, also between releases. To release: raise the version in
+`Cargo.toml`, add a CHANGELOG entry, commit, and tag `vX.Y.Z`.
 
 ## Tests
 
