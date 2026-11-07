@@ -1259,7 +1259,7 @@ fn draw_trigger_marker(ui: &egui::Ui, transform: &PlotTransform) {
 }
 
 /// The OSD readout of a channel that is on, as a button that hides or shows
-/// its trace. A hidden channel is grey with a dashed look ("hidden").
+/// its trace. A hidden channel is grey.
 fn channel_button(
     ui: &mut egui::Ui,
     name: &str,
@@ -1267,12 +1267,12 @@ fn channel_button(
     color: Color32,
     shown: bool,
 ) -> egui::Response {
-    let (shown_color, suffix, tip) = if shown {
-        (color, "", "Click to hide this channel")
+    let (shown_color, tip) = if shown {
+        (color, "Click to hide this channel")
     } else {
-        (OFF_COLOR, " (hidden)", "Click to show this channel")
+        (OFF_COLOR, "Click to show this channel")
     };
-    let label = RichText::new(format!("{name} {text}{suffix}"))
+    let label = RichText::new(format!("{name} {text}"))
         .monospace()
         .strong()
         .color(shown_color);
