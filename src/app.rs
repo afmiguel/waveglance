@@ -12,6 +12,11 @@ const CH2_COLOR: Color32 = Color32::from_rgb(0, 230, 255); // bright cyan
 const TRIGGER_COLOR: Color32 = Color32::from_rgb(255, 140, 0);
 const SCREEN_BG: Color32 = Color32::from_rgb(10, 10, 10);
 const GRID_COLOR: Color32 = Color32::from_rgb(90, 90, 90);
+/// Screen points for one wheel "line" (one notch of a mouse wheel on desktop).
+/// A browser sends about 100 points per notch.
+const WHEEL_LINE_POINTS: f32 = 50.0;
+/// Wheel distance (screen points) that zooms by a factor of e.
+const WHEEL_ZOOM_POINTS: f32 = 300.0;
 
 /// A file read by the open dialog or by drag-and-drop: (name, bytes or error).
 type Loaded = (String, Result<Vec<u8>, String>);
@@ -281,7 +286,7 @@ impl ScopeApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new("wheel: zoom · shift: time only · alt: volts only · drag: pan · double-click: reset")
+                    RichText::new("wheel: zoom (shift: time, alt: volts) · wheel on an axis: pan · drag: pan · double-click: reset")
                         .small()
                         .color(Color32::GRAY),
                 );
@@ -349,6 +354,8 @@ impl ScopeApp {
         let allow_pan = self
             .cursors
             .handle_pointer(ui.ctx(), self.last_transform.as_ref());
+        // The plot and its axis labels fill this area.
+        let outer = ui.available_rect_before_wrap();
         let response = Plot::new(("scope", self.load_count))
             .allow_drag(allow_pan)
             .show_grid(true)
@@ -374,16 +381,31 @@ impl ScopeApp {
                 };
                 Some(format!("{head}t = {}\nv = {}", si(p.x, "s"), si(p.y, "V")))
             })
-            // Mouse wheel zooms (like a scope knob); drag pans; double-click resets.
-            // Shift + wheel zooms only the time axis, Alt + wheel only the voltage axis.
+            // Mouse wheel over the plot zooms (like a scope knob); drag pans;
+            // double-click resets. Shift + wheel zooms only the time axis,
+            // Alt + wheel only the voltage axis. Wheel over an axis pans that axis.
             .allow_scroll(false)
             .show(ui, |plot| {
-                if plot.response().hovered() {
-                    let (delta, modifiers) =
-                        plot.ctx().input(|i| (i.smooth_scroll_delta, i.modifiers));
-                    let amount = delta.x + delta.y;
-                    if amount != 0.0 {
-                        let f = (amount / 200.0).exp();
+                let (delta, modifiers, pointer) = plot
+                    .ctx()
+                    .input(|i| (wheel_delta(i), i.modifiers, i.pointer.latest_pos()));
+                let amount = delta.x + delta.y;
+                let frame = *plot.transform().frame();
+                let zone = pointer.and_then(|p| axis_zone(p, frame, outer));
+                // An axis label area pans that axis; inside the plot frame the wheel zooms.
+                // (The plot response also covers the axis areas, so test the zones first.)
+                if amount != 0.0 {
+                    if let Some(axis) = zone {
+                        // Pan by the wheel distance in screen points.
+                        // Wheel up: earlier times (left) / higher voltages (up).
+                        let [dx, dy] = plot.transform().dvalue_dpos();
+                        let shift = match axis {
+                            Axis::X => egui::vec2((-f64::from(amount) * dx) as f32, 0.0),
+                            Axis::Y => egui::vec2(0.0, (-f64::from(amount) * dy) as f32),
+                        };
+                        plot.translate_bounds(shift);
+                    } else if pointer.is_some_and(|p| frame.contains(p)) {
+                        let f = (amount / WHEEL_ZOOM_POINTS).exp();
                         let factor = if modifiers.shift {
                             egui::vec2(f, 1.0)
                         } else if modifiers.alt {
@@ -393,6 +415,12 @@ impl ScopeApp {
                         };
                         plot.zoom_bounds_around_hovered(factor);
                     }
+                }
+                if zone.is_some() {
+                    plot.ctx().set_cursor_icon(match zone {
+                        Some(Axis::X) => egui::CursorIcon::ResizeHorizontal,
+                        _ => egui::CursorIcon::ResizeVertical,
+                    });
                 }
                 if let Some(fit) = fit {
                     let channels = [
@@ -435,6 +463,8 @@ impl ScopeApp {
                     );
                 }
             });
+        self.cursors
+            .update_pointer_icon(ui.ctx(), &response.transform);
         self.last_transform = Some(response.transform);
     }
 }
@@ -453,6 +483,47 @@ impl eframe::App for ScopeApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).fill(Color32::BLACK))
             .show(ui, |ui| self.scope_screen(ui));
+    }
+}
+
+/// Mouse-wheel movement in this frame, in screen points, from the raw wheel
+/// events. Unlike `smooth_scroll_delta`, nothing carries over to the next
+/// frames, so a zoom or pan stops as soon as the wheel stops and never
+/// reaches another area that the pointer moves to.
+fn wheel_delta(input: &egui::InputState) -> egui::Vec2 {
+    input
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            egui::Event::MouseWheel { unit, delta, .. } => Some(match unit {
+                egui::MouseWheelUnit::Point => *delta,
+                egui::MouseWheelUnit::Line => *delta * WHEEL_LINE_POINTS,
+                egui::MouseWheelUnit::Page => *delta * input.viewport_rect().height(),
+            }),
+            _ => None,
+        })
+        .fold(egui::Vec2::ZERO, |acc, d| acc + d)
+}
+
+/// A plot axis, for the axis label areas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    X,
+    Y,
+}
+
+/// The axis label area that contains `pos`: below the plot frame (time axis)
+/// or left of it (voltage axis), inside `outer`, the area of the whole plot.
+pub fn axis_zone(pos: egui::Pos2, frame: egui::Rect, outer: egui::Rect) -> Option<Axis> {
+    if !outer.contains(pos) {
+        return None;
+    }
+    if pos.y > frame.bottom() && pos.x >= frame.left() && pos.x <= frame.right() {
+        Some(Axis::X)
+    } else if pos.x < frame.left() && pos.y >= frame.top() && pos.y <= frame.bottom() {
+        Some(Axis::Y)
+    } else {
+        None
     }
 }
 
@@ -544,7 +615,23 @@ pub fn si_bare(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{si, time_span, voltage_span_in};
+    use super::{Axis, axis_zone, si, time_span, voltage_span_in};
+    use eframe::egui::{Rect, pos2};
+
+    #[test]
+    fn axis_zones() {
+        let outer = Rect::from_min_max(pos2(0.0, 0.0), pos2(500.0, 400.0));
+        let frame = Rect::from_min_max(pos2(60.0, 10.0), pos2(490.0, 360.0));
+        assert_eq!(axis_zone(pos2(200.0, 380.0), frame, outer), Some(Axis::X));
+        assert_eq!(axis_zone(pos2(30.0, 200.0), frame, outer), Some(Axis::Y));
+        assert_eq!(
+            axis_zone(pos2(200.0, 200.0), frame, outer),
+            None,
+            "inside the plot"
+        );
+        assert_eq!(axis_zone(pos2(30.0, 380.0), frame, outer), None, "corner");
+        assert_eq!(axis_zone(pos2(200.0, 450.0), frame, outer), None, "outside");
+    }
 
     #[test]
     fn fit_vertical_uses_only_the_visible_time_window() {

@@ -10,6 +10,7 @@ the scope state: settings, a small screen thumbnail and the raw ADC samples.
 
 - Drop a `.wav` file on the window, or click **Open file…**.
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
+- Mouse wheel over a time or voltage axis: pan along that axis.
 - Drag: pan. Double-click: reset the view.
 - **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
   the first and last instant shown. **Fit both**: Fit H, then Fit V.

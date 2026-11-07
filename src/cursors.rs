@@ -146,7 +146,7 @@ impl Cursors {
             .map(|(id, _)| id)
     }
 
-    /// Start and stop drags, and show a resize pointer near a cursor line.
+    /// Start and stop drags.
     /// Call this before the plot is built. Returns `true` if the plot may pan
     /// (no cursor is being dragged).
     pub fn handle_pointer(
@@ -175,12 +175,24 @@ impl Cursors {
         if pressed && self.dragging.is_none() {
             self.dragging = near;
         }
+        self.dragging.is_none()
+    }
+
+    /// Show a resize pointer over a cursor line or while dragging one.
+    /// Call this AFTER the plot is shown: the plot sets its own pointer
+    /// (a crosshair), and the last call in a frame wins.
+    pub fn update_pointer_icon(&self, ctx: &egui::Context, transform: &PlotTransform) {
+        if self.mode == CursorMode::Off {
+            return;
+        }
+        let near = ctx
+            .input(|i| i.pointer.latest_pos())
+            .and_then(|pos| self.hit(transform, pos));
         match self.dragging.or(near) {
             Some(CursorId::T1 | CursorId::T2) => ctx.set_cursor_icon(CursorIcon::ResizeHorizontal),
             Some(CursorId::V1 | CursorId::V2) => ctx.set_cursor_icon(CursorIcon::ResizeVertical),
             None => {}
         }
-        self.dragging.is_none()
     }
 
     /// Move the dragged cursor to the pointer. Call this inside the plot.
@@ -282,7 +294,11 @@ mod tests {
     fn deltas_and_frequency() {
         let mut c = Cursors::default();
         c.place_in(&(0.0..=40e-6), &(-1.0..=1.0));
-        assert!((c.t[0] - 10e-6).abs() < 1e-18 && (c.t[1] - 30e-6).abs() < 1e-18, "{:?}", c.t);
+        assert!(
+            (c.t[0] - 10e-6).abs() < 1e-18 && (c.t[1] - 30e-6).abs() < 1e-18,
+            "{:?}",
+            c.t
+        );
         assert_eq!(c.v, [-0.5, 0.5]);
         assert!((c.delta_t() - 20e-6).abs() < 1e-18);
         assert!((c.frequency().unwrap() - 50e3).abs() < 1e-6);
