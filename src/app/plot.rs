@@ -817,7 +817,11 @@ impl ScopeApp {
         );
         for &line in &decoded_lines {
             if let (Some(d), Some(band)) = (self.decoded_at(line), self.decode_band(line)) {
-                let label = format!("{} · UART", self.traces()[line].label);
+                let label = format!(
+                    "{} · {}",
+                    self.traces()[line].label,
+                    self.line_protocol(line).label()
+                );
                 draw_decode_lane(
                     ui,
                     &response.transform,

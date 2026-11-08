@@ -200,6 +200,8 @@ pub fn decode(logic: &Logic, s: &Settings) -> Decoded {
             error = Some(FrameError::Framing);
         }
         frames.push(Frame {
+            kind: super::FrameKind::Data,
+            ack: None,
             start: e,
             end: e + f64::from(frame_bits) * bit,
             value,

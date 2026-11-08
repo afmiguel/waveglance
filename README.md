@@ -31,8 +31,9 @@ mode, time cursors T1 and T2, automatic measurements and the Math channel.*
 - **Search** for rising edges, falling edges or glitches in the whole record.
 - **Logic signals and buses** (VCD): one lane per signal, bus values in Hex,
   Dec, Bin or ASCII.
-- **Protocol decoder** (logic analyzer): **UART** today, on a VCD line or on an
-  analog channel; the module is made to take I2C and SPI later.
+- **Protocol decoders** (logic analyzer): **UART** and **I2C**, on VCD lines or
+  on analog channels; several lines at the same time, each with its own
+  settings. SPI can be added the same way.
 - **Reference waveform**: a second file drawn faint behind the traces.
 - **Export** to CSV, **screenshot** (PNG) and **print**, with a white screen
   for paper.
@@ -123,7 +124,7 @@ and `data[7:0]` in hex. X marks a bus value with unknown bits (x or z).*
   voltage measurements are off. The FFT shows frequencies, with levels in dB
   relative to the peak.
 
-### Protocol decoder: UART
+### Protocol decoders: UART
 
 ![Four serial lines decoded at the same time, each with its own settings](docs/images/uart-decode.png)
 
@@ -159,7 +160,27 @@ is no room above it in the 8 divisions.*
   the warning colour. The row warns when there are fewer than 4 samples per
   bit.
 - The decoders are a module of their own (`src/decode/`, one file per
-  protocol), so that I2C and SPI can be added later.
+  protocol), so that SPI can be added later.
+
+### Protocol decoder: I2C
+
+![I2C transactions decoded on SDA, with start and stop dots](docs/images/i2c-decode.png)
+
+*VCD example "I2C: temperature sensor": write a register of the sensor at 0x48,
+read the temperature with a repeated start (0x19 0x80, the last byte with a
+NACK), and an address that nobody answers (0x50, NACK). Green dot: start or
+repeated start; red dot: stop.*
+
+- Check the **SDA** line in **⇄ Decode ▾**; in its **▸** settings choose
+  **I2C** and the **SCL** line. A line named `sda` gets I2C with the line
+  named `scl` by itself.
+- The decoder shows the start (**S**) and repeated start (**Sr**), the 7-bit
+  address with the direction (**W 48**, **R 48**), the data bytes, the stop
+  (**P**), and **N** after a byte that was not acknowledged (NACK). A byte cut
+  by a start or stop is marked as incomplete, in the warning colour.
+- The clock rate (SCL) is measured and shown in the row.
+- It works on two channels of an oscilloscope too (the DPOX180H has two):
+  example "I2C on two analog channels", CH1 = SDA, CH2 = SCL.
 
 ### Other functions
 
@@ -207,7 +228,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 
 - Drop a file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
 - **File ▾ → Open example**: real FNIRSI DPOX180H and 1013D captures, Rigol captures, and VCD
-  files made for the viewer (a CPU bus, a DAC, and three UART examples).
+  files made for the viewer (a CPU bus, a DAC, three UART and two I2C examples).
 - The welcome screen lists all the controls; **? Help** (F1) has the main
   instructions.
 - Keyboard: Ctrl/⌘+O open, Ctrl/⌘+P print, F1 help, F/H/V fit, Z zoom view,
@@ -245,7 +266,7 @@ this on each push to `main`.
 | `src/formats/` | One module per file format, detection (`probe`) and `open` |
 | `src/app/` | User interface: `mod.rs` (state), `menus`, `readouts`, `plot`, `input`, `dialogs`, `actions`, `format` |
 | `src/measure.rs`, `src/fft.rs`, `src/cursors.rs` | Measurements, spectrum, cursors (work on any trace) |
-| `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`) |
+| `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`, `i2c.rs`) |
 | `src/export.rs`, `src/examples.rs`, `src/palette.rs` | CSV/PNG/print, built-in examples, colours |
 
 To add a file format: write a module in `src/formats/` that implements
@@ -378,7 +399,7 @@ The files in `assets/examples/rigol/` are Rigol captures (DHO1074 and MSO5000
 
 The files in `assets/examples/vcd/` are not captures: `scripts/make-vcd-examples.py`
 makes them (a CPU bus with write and read cycles, an 8-bit DAC with its analog
-output, and three UART examples). Run the script again to make the same files.
+output, three UART and two I2C examples). Run the script again to make the same files.
 
 The images in `docs/images/` are screenshots of this viewer with the example
 files above.

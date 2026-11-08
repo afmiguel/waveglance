@@ -194,6 +194,25 @@ pub const EXAMPLES: &[Example] = &[
         file: "example-vcd-uart-session.vcd",
         bytes: include_bytes!("../assets/examples/vcd/uart-session.vcd"),
     },
+    Example {
+        group: "Logic (VCD)",
+        label: "I2C: temperature sensor",
+        about: "I2C at 100 kHz: write a register of a sensor at 0x48, read the \
+                temperature with a repeated start (0x19 0x80 = 25.5 °C, the last byte \
+                with a NACK), and an address that nobody answers (0x50, NACK). In \
+                Decode ▾, check sda: it uses I2C with scl as clock.",
+        file: "example-vcd-i2c-sensor.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/i2c-sensor.vcd"),
+    },
+    Example {
+        group: "Logic (VCD)",
+        label: "I2C on two analog channels",
+        about: "The temperature read as an oscilloscope sees it: CH1 is SDA, CH2 is \
+                SCL, 3.3 V open-drain lines with slow rising edges and noise. In \
+                Decode ▾, check CH1, then in its ▸ settings choose I2C and CH2 as SCL.",
+        file: "example-vcd-i2c-analog.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/i2c-analog.vcd"),
+    },
 ];
 
 #[cfg(test)]
@@ -222,7 +241,7 @@ mod tests {
             uart,
             ..Default::default()
         };
-        let d = crate::decode::decode(w.trace(label).unwrap(), &settings).unwrap();
+        let d = crate::decode::decode(w.trace(label).unwrap(), None, &settings).unwrap();
         assert!(d.warnings.is_empty(), "{:?}", d.warnings);
         d
     }
@@ -238,6 +257,48 @@ mod tests {
         let d = decode_with(file, label, Default::default());
         assert!(d.frames.iter().all(|f| f.error.is_none()));
         text(&d)
+    }
+
+    /// The I2C frames of an example, in short: "S W48 00 Sr R48 19 80N P".
+    fn i2c_text(file: &str, sda: &str, scl: &str) -> String {
+        use crate::decode::FrameKind;
+        let e = EXAMPLES.iter().find(|e| e.file.contains(file)).unwrap();
+        let w = crate::formats::open(e.bytes).unwrap();
+        let settings = crate::decode::Settings {
+            protocol: crate::decode::Protocol::I2c,
+            ..Default::default()
+        };
+        let d = crate::decode::decode(w.trace(sda).unwrap(), w.trace(scl), &settings).unwrap();
+        assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+        assert!(d.frames.iter().all(|f| f.error.is_none()));
+        assert!(d.title.contains("100.0 kHz"), "{}", d.title);
+        d.frames
+            .iter()
+            .map(|f| {
+                let n = if f.ack == Some(false) { "N" } else { "" };
+                match f.kind {
+                    FrameKind::Start { repeated } => if repeated { "Sr" } else { "S" }.to_owned(),
+                    FrameKind::Stop => "P".to_owned(),
+                    FrameKind::Address { read } => {
+                        format!("{}{:02X}{n}", if read { "R" } else { "W" }, f.value)
+                    }
+                    FrameKind::Data => format!("{:02X}{n}", f.value),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn i2c_examples_decode() {
+        assert_eq!(
+            i2c_text("i2c-sensor", "sda", "scl"),
+            "S W48 01 60 P S W48 00 Sr R48 19 80N P S W50N P"
+        );
+        assert_eq!(
+            i2c_text("i2c-analog", "CH1", "CH2"),
+            "S W48 00 Sr R48 19 80N P"
+        );
     }
 
     #[test]

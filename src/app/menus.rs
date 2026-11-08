@@ -362,7 +362,7 @@ impl ScopeApp {
             // and the open menu would jump when a line is checked.
             let decode_label = match decoded.len() {
                 0 => "⇄ Decode ▾".to_owned(),
-                n => format!("⇄ Decode: UART ×{n} ▾"),
+                n => format!("⇄ Decode: ×{n} ▾"),
             };
             toolbar_menu(
                 ui,

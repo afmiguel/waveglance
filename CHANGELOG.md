@@ -5,6 +5,20 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.26.0 — 2026-11-08
+
+- **I2C decoder.** In Decode ▾, check the SDA line and, in its ▸ settings,
+  choose I2C and the SCL line (a line named `sda` gets I2C with `scl` by
+  itself). It shows start and repeated start (green dots, S and Sr), the
+  7-bit address with W or R, the data bytes, NACK (N) and stop (red dot, P);
+  a byte cut by a start or stop is marked incomplete. The SCL rate is
+  measured. It works on VCD lines and on two analog channels.
+- Each decoded line has its own protocol (UART or I2C) in its ▸ settings.
+- New examples: **I2C: temperature sensor** (VCD, 100 kHz: register write,
+  read with repeated start, an address with no answer) and **I2C on two
+  analog channels** (the read as an oscilloscope sees it).
+- In ASCII, the row of an I2C line keeps spaces between the items.
+
 ## 0.25.0 — 2026-11-08
 
 - **DPOX180H examples** (File ▾ → Open example → FNIRSI DPOX180H): a 1 kHz

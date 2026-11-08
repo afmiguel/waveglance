@@ -291,6 +291,86 @@ def uart_session():
     return header("1 ns", variables) + d.lines()
 
 
+def i2c_quarters(transactions):
+    """(sda, scl) for each quarter of a clock period, for I2C transactions.
+
+    Each transaction is a list of items: ("start",), ("restart",), ("stop",),
+    ("byte", value, ack) or ("idle", quarters). SDA changes only while SCL is
+    low, except for start and stop."""
+    q = [(1, 1)] * 4
+    for tr in transactions:
+        for item in tr:
+            kind = item[0]
+            if kind == "start":
+                q += [(1, 1), (0, 1), (0, 0), (0, 0)]
+            elif kind == "restart":
+                q += [(1, 0), (1, 1), (0, 1), (0, 0)]
+            elif kind == "stop":
+                q += [(0, 0), (0, 1), (1, 1), (1, 1)]
+            elif kind == "byte":
+                value, ack = item[1], item[2]
+                bits = [(value >> k) & 1 for k in range(7, -1, -1)] + [0 if ack else 1]
+                for b in bits:
+                    q += [(b, 0), (b, 1), (b, 1), (b, 0)]
+            elif kind == "idle":
+                q += [(1, 1)] * item[1]
+    return q + [(1, 1)] * 4
+
+
+# A temperature sensor at address 0x48 and an absent device at 0x50.
+I2C_SESSION = [
+    # Write the configuration register (0x01) with 0x60.
+    [("start",), ("byte", 0x48 << 1, True), ("byte", 0x01, True),
+     ("byte", 0x60, True), ("stop",), ("idle", 24)],
+    # Read the temperature: pointer 0x00, repeated start, read 2 bytes
+    # (0x19 0x80 = 25.5 degrees C); the last byte gets a NACK.
+    [("start",), ("byte", 0x48 << 1, True), ("byte", 0x00, True),
+     ("restart",), ("byte", 0x48 << 1 | 1, True), ("byte", 0x19, True),
+     ("byte", 0x80, False), ("stop",), ("idle", 24)],
+    # Nobody answers at 0x50: NACK on the address.
+    [("start",), ("byte", 0x50 << 1, False), ("stop",)],
+]
+
+
+def i2c_sensor():
+    """I2C at 100 kHz (quarter period 2.5 us), as a logic analyzer records
+    it: write a register, read the temperature with a repeated start, and an
+    address without answer."""
+    d = Dump()
+    quarter = 2500  # ns
+    for k, (sda, scl) in enumerate(i2c_quarters(I2C_SESSION)):
+        t = k * quarter
+        d.set(t, "!", sda)
+        d.set(t, '"', scl)
+    d.events.setdefault((k + 1) * quarter, [])
+    variables = [("wire", 1, "!", "sda"), ("wire", 1, '"', "scl")]
+    return header("1 ns", variables) + d.lines()
+
+
+def i2c_analog():
+    """The temperature read of `i2c_sensor` as an oscilloscope sees it on
+    two channels: 3.3 V open-drain lines, slow rising edges (pull-up
+    resistor, 1 us), fast falling edges, +-40 mV of noise. One sample every
+    0.2 us (50 per clock period)."""
+    rng = random.Random(2)
+    quarters = i2c_quarters([I2C_SESSION[1]])
+    step = 0.2  # us
+    quarter = 2.5  # us
+    d = Dump()
+    v = {"!": 3.3, '"': 3.3}
+    n = round(len(quarters) * quarter / step)
+    for k in range(n):
+        t = k * step
+        sda, scl = quarters[min(int(t / quarter), len(quarters) - 1)]
+        for ident, level in (("!", sda), ('"', scl)):
+            target = 3.3 * level
+            tau = 1.0 if target > v[ident] else 0.05
+            v[ident] += (target - v[ident]) * (1 - math.exp(-step / tau))
+            d.real(round(t * 10), ident, v[ident] + rng.uniform(-0.04, 0.04))
+    variables = [("real", 64, "!", "CH1"), ("real", 64, '"', "CH2")]
+    return header("100 ns", variables) + d.lines()
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     files = [
@@ -299,6 +379,8 @@ def main():
         ("uart-at.vcd", uart_at()),
         ("uart-analog.vcd", uart_analog()),
         ("uart-session.vcd", uart_session()),
+        ("i2c-sensor.vcd", i2c_sensor()),
+        ("i2c-analog.vcd", i2c_analog()),
     ]
     for name, lines in files:
         (OUT / name).write_text("\n".join(lines) + "\n")

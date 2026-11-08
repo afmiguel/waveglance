@@ -1,17 +1,19 @@
-//! Protocol decoders (logic analyzer functions): serial data in a trace
-//! made into bytes.
+//! Protocol decoders (logic analyzer functions): serial data in one or
+//! more traces made into bytes. Protocols: UART (one line) and I2C (SDA
+//! and SCL).
 //!
 //! The part shared by all protocols is here:
 //!
 //! - [`Logic`]: a trace as a logic signal (0 or 1): its first level and the
 //!   times where it changes. An analog trace is compared with a threshold
 //!   (with hysteresis); a digital trace (VCD) is used as it is.
-//! - [`Frame`]: one decoded word (start and end time, value, error).
+//! - [`Frame`]: one decoded word (start and end time, kind, value, error).
 //!
 //! Each protocol is a submodule that makes frames from one or more
 //! [`Logic`] signals. To add a protocol: add a submodule, a variant to
 //! [`Protocol`] and its settings to [`Settings`].
 
+pub mod i2c;
 pub mod uart;
 
 use crate::model::Trace;
@@ -131,6 +133,8 @@ pub enum FrameError {
     Parity,
     /// The stop bit is 0 (wrong baud rate, or a break).
     Framing,
+    /// A byte cut by a start or stop condition (I2C).
+    Incomplete,
 }
 
 impl FrameError {
@@ -138,13 +142,29 @@ impl FrameError {
         match self {
             Self::Parity => "parity error",
             Self::Framing => "framing error (stop bit is 0)",
+            Self::Incomplete => "incomplete byte (cut by a start or stop)",
         }
     }
+}
+
+/// What a frame is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FrameKind {
+    /// A data word (UART character, I2C data byte).
+    #[default]
+    Data,
+    /// I2C start condition (`repeated`: a start inside a transaction).
+    Start { repeated: bool },
+    /// I2C stop condition.
+    Stop,
+    /// I2C address byte: 7-bit address in `value`, and the direction.
+    Address { read: bool },
 }
 
 /// One decoded word.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frame {
+    pub kind: FrameKind,
     /// Time of the start of the frame (start bit edge for UART).
     pub start: f64,
     /// Time of the end of the frame (end of the stop bits for UART).
@@ -152,6 +172,8 @@ pub struct Frame {
     pub value: u32,
     /// Number of data bits.
     pub bits: u8,
+    /// I2C: the acknowledge bit (true = ACK, SDA low); `None` for UART.
+    pub ack: Option<bool>,
     pub error: Option<FrameError>,
 }
 
@@ -163,16 +185,24 @@ pub enum Protocol {
     #[default]
     Off,
     Uart,
+    I2c,
 }
 
 impl Protocol {
-    pub const ALL: [Self; 2] = [Self::Off, Self::Uart];
+    /// The protocols that a line can use.
+    pub const ALL: [Self; 2] = [Self::Uart, Self::I2c];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Off => "Off",
             Self::Uart => "UART",
+            Self::I2c => "I2C",
         }
+    }
+
+    /// The protocol needs a clock line (I2C: SCL).
+    pub fn needs_clock(self) -> bool {
+        self == Self::I2c
     }
 }
 
@@ -216,14 +246,32 @@ pub struct Decoded {
     pub low: f64,
 }
 
-/// Decode `trace` with `settings`. `None` when the protocol is Off or the
-/// trace is empty.
-pub fn decode(trace: &Trace, settings: &Settings) -> Option<Decoded> {
+/// Decode `trace` with `settings`; `clock` is the clock line of a protocol
+/// that needs one (I2C: SCL, with `trace` the SDA line). `None` when the
+/// protocol is Off or the trace is empty.
+pub fn decode(trace: &Trace, clock: Option<&Trace>, settings: &Settings) -> Option<Decoded> {
     let (level, hysteresis) = threshold(trace, settings.threshold);
     let logic = to_logic(trace, level, hysteresis)?;
     let mut out = match settings.protocol {
         Protocol::Off => return None,
         Protocol::Uart => uart::decode(&logic, &settings.uart),
+        Protocol::I2c => {
+            let scl = clock.and_then(|c| {
+                let (level, hysteresis) = threshold(c, settings.threshold);
+                to_logic(c, level, hysteresis)
+            });
+            match scl {
+                Some(scl) => i2c::decode(&logic, &scl),
+                None => Decoded {
+                    title: "no clock line".to_owned(),
+                    frames: Vec::new(),
+                    warnings: vec!["choose the clock line (SCL) in the ▸ settings".to_owned()],
+                    threshold: 0.0,
+                    high: 0.0,
+                    low: 0.0,
+                },
+            }
+        }
     };
     out.threshold = level;
     (out.low, out.high) = trace

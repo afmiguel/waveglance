@@ -11,5 +11,7 @@ example menu of the viewer. Run the script again to make the same files.
 | `uart-at.vcd` | A serial (UART) exchange at 115200 baud, 8N1: a host sends `AT\r\n` on `tx`, the device answers `\r\nOK\r\n` on `rx`. |
 | `uart-analog.vcd` | A 3.3 V UART line as an oscilloscope sees it (`tx_pin`, in volts): 9600 baud, 8N1, `Hello, FNIRSI!\r\n`, with slow edges and noise. |
 | `uart-session.vcd` | Four serial lines: `host_tx` and `dev_tx` (AT commands and answers, 115200 8N1, then a break on `dev_tx`), `gps` (NMEA sentences, 9600 8N1) and `rs232` (inverted, 19200 7E1, one parity error). |
+| `i2c-sensor.vcd` | I2C at 100 kHz (`sda`, `scl`): write a register of a sensor at 0x48, read the temperature with a repeated start (0x19 0x80, the last byte with a NACK), and an address nobody answers (0x50). |
+| `i2c-analog.vcd` | The temperature read of `i2c-sensor.vcd` as an oscilloscope sees it: `CH1` (SDA) and `CH2` (SCL) in volts, 3.3 V open-drain lines with slow rising edges and noise. |
 
 They are part of this project, under the same terms as its source code.
