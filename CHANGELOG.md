@@ -5,6 +5,16 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.17.0 — 2026-11-08
+
+- **VCD examples** (File ▾ → Open example → Logic (VCD)), made for the
+  viewer by `scripts/make-vcd-examples.py`:
+  - **CPU bus**: 10 MHz clock, reset, write and read cycles on
+    `addr[15:0]` and `data[7:0]` (z between cycles, x before a read
+    answers), the strobes and a beat counter.
+  - **8-bit DAC**: a 500 Hz sine: the code bus, the load strobe and the
+    filtered analog output.
+
 ## 0.16.1 — 2026-11-08
 
 - Fix: a file with logic signals only, opened with Y: Div saved from an

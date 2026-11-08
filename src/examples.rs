@@ -4,6 +4,8 @@
 //!   `assets/examples/1013d/README.md`.
 //! - Rigol captures from the RigolWFM project by Scott Prahl, BSD 3-Clause:
 //!   see `assets/examples/rigol/README.md`.
+//! - VCD files made by `scripts/make-vcd-examples.py` for this project:
+//!   see `assets/examples/vcd/README.md`.
 //!
 //! There are no DPOX180H examples yet: the only public DPOX180H files have
 //! no license.
@@ -37,6 +39,10 @@ pub const GROUPS: &[Group] = &[
         name: "Rigol",
         credit: "From RigolWFM, copyright (c) 2020-23 Scott Prahl \
                  (github.com/scottprahl/RigolWFM), license BSD 3-Clause",
+    },
+    Group {
+        name: "Logic (VCD)",
+        credit: "Made for this viewer by scripts/make-vcd-examples.py (not captures)",
     },
 ];
 
@@ -124,6 +130,20 @@ pub const EXAMPLES: &[Example] = &[
         file: "example-rigol-ds1102e.csv",
         bytes: include_bytes!("../assets/examples/rigol/DS1102E-D.csv"),
     },
+    Example {
+        group: "Logic (VCD)",
+        label: "CPU bus: write and read cycles",
+        about: "A 10 MHz bus: address, data and strobes. The data bus is z (shown X) when                 no device drives it. Zoom in to read the values; right-click a bus readout                 at the bottom for Hex, Dec or Bin.",
+        file: "example-vcd-memory-bus.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/memory-bus.vcd"),
+    },
+    Example {
+        group: "Logic (VCD)",
+        label: "8-bit DAC: code and analog output",
+        about: "A 500 Hz sine from an 8-bit DAC: the code bus, the load strobe and the                 filtered analog output in volts. Try the time cursors on the code and vout.",
+        file: "example-vcd-dac-sine.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/dac-sine.vcd"),
+    },
 ];
 
 #[cfg(test)]
@@ -134,8 +154,29 @@ mod tests {
     fn all_examples_parse() {
         for e in EXAMPLES {
             let w = crate::formats::open(e.bytes).unwrap_or_else(|err| panic!("{}: {err}", e.file));
-            assert!(w.trace("CH1").is_some(), "{}", e.file);
+            assert!(!w.traces.is_empty(), "{}", e.file);
+            assert!(w.warnings.is_empty(), "{}: {:?}", e.file, w.warnings);
             assert!(GROUPS.iter().any(|g| g.name == e.group), "{}", e.file);
         }
+    }
+
+    #[test]
+    fn memory_bus_reads_back_what_was_written() {
+        let e = EXAMPLES
+            .iter()
+            .find(|e| e.file.contains("memory-bus"))
+            .unwrap();
+        let w = crate::formats::open(e.bytes).unwrap();
+        let at = |label: &str, t: f64| {
+            let tr = w.trace(label).unwrap_or_else(|| panic!("{label}"));
+            crate::cursors::value_at(tr.points(), t).unwrap()
+        };
+        assert_eq!(w.trace("data[7:0]").and_then(|t| t.bus), Some(8));
+        // Write cycle 2: 0x47 to 0x2002; read cycle 8 reads it back.
+        assert_eq!(at("addr[15:0]", 3.7e-6), f64::from(0x2002));
+        assert_eq!(at("data[7:0]", 3.7e-6), f64::from(0x47));
+        assert_eq!(at("rd_n", 3.7e-6), 0.0);
+        // Between cycles nobody drives the data bus: z, shown as X.
+        assert!(at("data[7:0]", 3.45e-6).is_nan());
     }
 }

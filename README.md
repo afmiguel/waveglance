@@ -23,7 +23,8 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 ## Use
 
 - Drop a `.wav` file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
-- **File ▾ → Open example**: real FNIRSI 1013D and Rigol captures built into the app.
+- **File ▾ → Open example**: real FNIRSI 1013D and Rigol captures built into the app, and two VCD
+  files with buses (made for the viewer).
 - **File ▾ → Open reference…**: a second file drawn faint behind the traces,
   to compare. The REF readout at the bottom hides or shows it.
 - **File ▾ → Export CSV…**, **Save screenshot (PNG)…**, **Print…** (Ctrl/⌘+P,
@@ -229,5 +230,9 @@ The files in `assets/examples/rigol/` are Rigol captures (DHO1074 and MSO5000
 [scottprahl/RigolWFM](https://github.com/scottprahl/RigolWFM), copyright (c)
 2020-23 Scott Prahl, licensed BSD 3-Clause (full text in
 `assets/examples/rigol/LICENSE.txt`). They are not changed.
+
+The files in `assets/examples/vcd/` are not captures: `scripts/make-vcd-examples.py`
+makes them (a CPU bus with write and read cycles, and an 8-bit DAC with its
+analog output). Run the script again to make the same files.
 
 There are no DPOX180H examples: the only public DPOX180H files have no license.
