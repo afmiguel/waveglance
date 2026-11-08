@@ -1,107 +1,210 @@
 # fnirsi-viewer
 
-A viewer for the waveform files (`.wav`) that FNIRSI oscilloscopes save. It
-runs on the desktop and in a web browser (WebAssembly).
+A viewer for oscilloscope and logic analyzer files: FNIRSI `.wav` files,
+Keysight/Agilent and Rigol files, VCD files and CSV tables. It runs on the
+desktop and in a web browser (WebAssembly), with no installation:
+**<https://afmiguel.github.io/fnirsi-viewer/>**.
 
-Supported files (the format is found automatically from the file; if it is
-not certain, a window asks):
+![Two channels of a FNIRSI 1013D in Div mode, with time cursors, measurements and the Math channel CH1 − CH2](docs/images/two-channels-math.png)
+
+*FNIRSI 1013D file (example "500 kHz on two channels"): two channels in Div
+mode, time cursors T1 and T2, automatic measurements and the Math channel.*
+
+## Features
+
+- **Many file formats**, found automatically: FNIRSI DPOX180H and 1013D/1014D
+  `.wav`, Keysight/Agilent and Rigol `.bin`, Rigol `.wfm`, VCD and CSV (see
+  [Supported files](#supported-files)).
+- **A scope screen**: 8 divisions with each channel at its own V/div and
+  ground position (**Div**), or one axis in volts (**Volts**). Channel, time
+  base, mode, trigger and record length readouts at the bottom (OSD).
+- **Zoom and pan** with the mouse wheel, trackpad, keyboard or the overview
+  strip (**⊕ Zoom**), and **⛶ Fit** to the whole record, to the samples or to
+  the screen that the scope showed.
+- **Automatic measurements** (15 values per channel) of the screen, of the
+  whole record or between the cursors, with **statistics per cycle**.
+- **Cursors**: time (T1, T2, ΔT, 1/ΔT and the voltage of each channel) and
+  voltage (V1, V2, ΔV).
+- **Math channel**: CH1 + CH2 or CH1 − CH2, measured like a channel.
+- **Spectrum (FFT)** under the plot: 5 windows, dBV or V RMS, line or bars,
+  peak readout.
+- **Search** for rising edges, falling edges or glitches in the whole record.
+- **Logic signals and buses** (VCD): one lane per signal, bus values in Hex,
+  Dec, Bin or ASCII.
+- **Protocol decoder** (logic analyzer): **UART** today, on a VCD line or on an
+  analog channel; the module is made to take I2C and SPI later.
+- **Reference waveform**: a second file drawn faint behind the traces.
+- **Export** to CSV, **screenshot** (PNG) and **print**, with a white screen
+  for paper.
+- **Built-in examples**: real 1013D and Rigol captures, and VCD files with
+  buses and UART lines.
+- The settings (Y mode, measurements, FFT, cursors, decoder…) are kept for the
+  next session.
+
+### Spectrum (FFT)
+
+![FFT of a 1 kHz square wave, drawn as bars](docs/images/fft-bars.png)
+
+*FNIRSI 1013D file (example "1 kHz square wave"): FFT of CH1 as bars, Hanning
+window. The odd harmonics of the square wave are at 3, 5, 7… kHz.*
+
+**∿ FFT ▾** shows the spectrum of one channel under the time plot, of the
+samples shown in the time plot (zoom in to analyse a part).
+
+- Windows: Rectangular, Hanning, Hamming, Blackman-Harris and Flat top.
+- Scale: dBV (0 dBV = 1 V RMS) or V RMS.
+- Draw: a line, or bars (one bar per frequency bin, like a spectrum analyzer).
+  Zoomed out, the bins in one screen column make one bar, at the highest level.
+- Readouts: the peak (frequency interpolated between bins), Δf (the frequency
+  step) and N (the samples used).
+- The wheel zooms and a drag pans the spectrum; **⛶ Fit** next to the readouts
+  (or a double-click) returns to the start view: up to 20 × the peak
+  frequency.
+
+### Zoom view and four channels
+
+![A Rigol DHO1074 file with four channels and the zoom view](docs/images/zoom-view.png)
+
+*Rigol DHO1074 `.bin` file (example): four channels, with the overview of the
+whole record above the plot (**⊕ Zoom**). The bright window is the part shown.*
+
+- Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis
+  only. Wheel over an axis: pan along that axis.
+- Trackpad: a vertical swipe zooms, a horizontal swipe pans the time axis.
+- Drag: pan. Double-click: reset the view.
+- **⊕ Zoom**: click or drag in the overview to move there, wheel on it to zoom.
+- **⛶ Fit ▾**: **Fit H** (full time span), **Fit V** (voltage axis fitted to the
+  samples shown), **Fit both**, and **Scope screen** (the time window that the
+  scope showed; a file opens on it when it stores it).
+
+### Cursors, measurements and the white screen
+
+![A Rigol MSO5000 file on the white screen, with time and voltage cursors](docs/images/white-cursors.png)
+
+*Rigol MSO5000 `.bin` file (example), on the white screen: time and voltage
+cursors, and the measurements of four channels.*
+
+- **⌖ Cursors ▾** (Off / Time / Volt / Both, and *Bring to view*): drag a
+  dashed cursor line to move it, or use Tab and the arrow keys. A cursor
+  outside the view shows an arrow at the edge (◀T1, V2▲). Time cursors show
+  T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2 (linear
+  interpolation). Voltage cursors show V1, V2 and ΔV.
+- **▤ Measure ▾**: Freq, Period, Vpp, Vmax, Vmin, Vtop, Vbase, Vamp, Mean, RMS,
+  Rise, Fall, +Width, −Width and +Duty, for the channels you choose. The
+  samples measured: **Screen** (the time span shown), **Record** (the whole
+  file) or **T1–T2** (between the time cursors).
+  - Vtop and Vbase are the most common high and low levels (histogram).
+  - Edges use the 10 %, 50 % and 90 % levels between Vbase and Vtop, with
+    hysteresis. Glitches (two edges closer than 10 % of the typical edge
+    spacing) are ignored.
+  - With an amplitude below 0.1 division, the signal is taken as noise and
+    the time measurements show "—".
+  - **Statistics per cycle**: mean, min, max, σ and n of the time
+    measurements, in a floating window.
+- Readouts use 4 significant digits, and never more resolution than the
+  samples have (one ADC code for voltages; Rise/Fall shorter than 2 samples
+  show "<…"). If the signal is clipped, its voltage measurements are orange
+  and start with "?": the real value can be larger.
+- **◐ White / ◐ Black**: a white screen with darker colours, for printing.
+
+### Logic signals and buses (VCD)
+
+![A CPU bus from a VCD file: clock, strobes, and the address and data buses in hex](docs/images/vcd-bus.png)
+
+*VCD example "CPU bus": the clock, the strobes, and the buses `addr[15:0]`
+and `data[7:0]` in hex. X marks a bus value with unknown bits (x or z).*
+
+- 1-bit signals are drawn as steps, each in its own lane, under the analog
+  traces; `real` variables are analog traces.
+- A bus (up to 64 bits) is a lane with the value of each part written in it.
+  Right-click (or long-press) the bus readout at the bottom to choose Hex, Dec,
+  Bin or ASCII. Hover a lane to read the value at the pointer.
+- With logic signals only, the y axis is "Logic"; Y, Math, voltage cursors and
+  voltage measurements are off. The FFT shows frequencies, with levels in dB
+  relative to the peak.
+
+### Protocol decoder: UART
+
+![UART answers decoded as ASCII from a VCD file with four serial lines](docs/images/uart-decode.png)
+
+*VCD example "UART: complete session (4 lines)", Decode → UART on `dev_tx`
+(115200 baud, 8N1): each byte in a lane, and the whole text under the plot.
+The last word is a break (a framing error, in the warning colour).*
+
+![A noisy 3.3 V serial line decoded with an automatic threshold](docs/images/uart-analog.png)
+
+*VCD example "UART on an analog line": a 3.3 V line with slow edges and noise,
+as an oscilloscope sees it. The baud rate (9600) and the threshold (1.65 V)
+are found automatically.*
+
+**⇄ Decode ▾** makes a serial line into bytes:
+
+- **UART**: baud rate measured from the signal (rounded to a standard rate) or
+  chosen; 5 to 9 data bits; parity None, Even or Odd; 1 or 2 stop bits; idle
+  high, or low (an inverted line, such as RS-232 before the transceiver).
+- The data line is a channel of the oscilloscope or a VCD signal. An analog
+  channel is made into 0 and 1 with a threshold: automatic (the middle of the
+  signal, with hysteresis) or a value in volts.
+- The words are drawn in a lane under the traces and listed in a row under the
+  plot in Hex, Dec, Bin or ASCII. A click on a word centres it in the plot;
+  **⎘ Copy** copies all of them. Words with a parity or framing error are in
+  the warning colour. The row warns when there are fewer than 4 samples per
+  bit.
+- The decoders are a module of their own (`src/decode/`, one file per
+  protocol), so that I2C and SPI can be added later.
+
+### Other functions
+
+- **Σ Math ▾**: CH1 + CH2 or CH1 − CH2 (sample by sample, in volts), drawn
+  and measured like a channel (MATH row).
+- **⌕ Search ▾**: rising edges, falling edges or glitches in the whole record
+  of a channel. Marks on the bottom edge show them; [ and ] centre the view on
+  the previous and next one.
+- **File ▾ → Open reference…**: a second file drawn faint behind the traces,
+  to compare. The REF readout at the bottom hides or shows it.
+- **File ▾ → Export CSV…**, **Save screenshot (PNG)…** and **Print…** (on a
+  white screen).
+- Click the **CH1**, **CH2**… readout at the bottom to hide or show that
+  channel (its trace, ground marker, measurements and cursor values). Mouse
+  wheel on it: V/div of that channel (1-2-5 steps, Div mode; * = not the
+  file's V/div).
+- Drag a ground marker (**1▶**, **2▶**) to move that channel (this switches Y
+  to Div, where each channel has its own scale).
+- The time axis has the trigger at t = 0 (the "T" marker on the top edge). The
+  voltage axis is in volts at the probe tip (the V/div that the scope shows
+  already includes the probe setting).
+- If a file cannot be opened, a banner says why, and the file shown before
+  stays. If the format is not certain, a window asks which one it is.
+
+## Supported files
+
+The format is found automatically from the file; if it is not certain, a
+window asks.
 
 | Model | File | Notes |
 |-------|------|-------|
-| DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes; coupling and trigger settings |
-| 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
+| FNIRSI DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes; coupling and trigger settings |
+| FNIRSI 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
 | Keysight / Agilent | `.bin` (AG01, AG03, AG10) | Up to 4 channels; volts or amperes; no V/div in the file (a V/div that fits is used) |
-| VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, buses (up to 64 bits) as value lanes in hex, dec or bin, `real` variables as analog traces |
 | Rigol | `.bin` (MSO5000 RG01, DHO800/1000 RG03) | Same layout as Keysight `.bin` |
 | Rigol | `.wfm` (DS1000Z, DS1000E/D, DS2000) | V/div, probe, coupling and time/div from the file; 8-bit samples. Logic analyzer data is not read |
+| VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, buses (up to 64 bits) as value lanes, `real` variables as analog traces |
 | CSV / text, any oscilloscope | `.csv`, `.txt`: time + channel columns | Keysight, Rigol, Tektronix, Siglent layouts and this viewer's export; `,` `;` tab separators |
 
-These `.wav` files are **not** audio files. Each model has its own binary
+The FNIRSI `.wav` files are **not** audio files. Each model has its own binary
 format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 2C23T and others) save other formats and are not supported.
 
 ## Use
 
-- Drop a `.wav` file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
-- **File ▾ → Open example**: real FNIRSI 1013D and Rigol captures built into the app, and two VCD
-  files with buses (made for the viewer).
-- **File ▾ → Open reference…**: a second file drawn faint behind the traces,
-  to compare. The REF readout at the bottom hides or shows it.
-- **File ▾ → Export CSV…**, **Save screenshot (PNG)…**, **Print…** (Ctrl/⌘+P,
-  on a white screen).
-- **◐ White / ◐ Black**: white screen with darker colours, for printing.
-- Keyboard: Ctrl/⌘+O open, F1 help, F/H/V fit, Z zoom view, S FFT, Y volts/div,
-  C cursors, Tab + arrows move a cursor, 1/2 hide a channel, +/− zoom, arrows pan.
-- Mouse wheel on the CH1 / CH2 readout: V/div of that channel (1-2-5 steps,
-  Div mode; * = not the file's V/div).
-- Drag a ground marker (1▶, 2▶) to move that channel (this switches Y to Div,
-  where each channel has its own scale).
-- The welcome screen lists all the controls. The **? Help** button has the main instructions.
-- Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
-- Mouse wheel over a time or voltage axis: pan along that axis.
-- Trackpad: a vertical swipe zooms, a horizontal swipe pans the time axis.
-- Drag: pan. Double-click: reset the view.
-- **⊕ Zoom**: overview of the whole record above the plot; the bright window
-  is the part shown. Click or drag in it to move there, wheel on it to zoom.
-- **Y ▾** menu: **Volts / Div**. *Volts* (default): one voltage axis for both channels.
-  *Div* is like the scope screen: 8 divisions, each channel drawn with its own
-  V/div from its ground marker (**1▶**, **2▶** on the left edge).
-- Click the **CH1** or **CH2** readout at the bottom to hide or show that
-  channel (its trace, ground marker, measurements and cursor values).
-- **⛶ Fit ▾** menu. **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
-  the first and last instant shown. **Fit both**: Fit H, then Fit V. **Scope screen**:
-  the time window the scope showed; a file opens on it when it stores it
-  (1013D, Keysight and Rigol `.bin`, Rigol `.wfm`).
-- Logic signals only (VCD): the y axis is "Logic"; Y, Math, voltage cursors
-  and voltage measurements are off. The FFT shows frequencies, with levels in
-  dB relative to the peak.
-- Buses (VCD): a lane with the value of each part written in it. Right-click
-  (or long-press) the bus readout in the bottom bar to choose Hex, Dec, Bin or ASCII.
-- **⌖ Cursors** menu (Off / Time / Volt / Both, and *Bring to view*): drag a
-  dashed cursor line to move it. The names T1, T2, V1, V2 are at the edges of
-  the plot; a cursor outside the view shows an arrow there (◀T1, V2▲). The
-  mode is kept for the next session.
-  Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
-  (linear interpolation). Voltage cursors show V1, V2 and ΔV.
-- **Σ Math ▾**: CH1 + CH2, CH1 − CH2 or CH2 − CH1, measured like a channel.
-- **⌕ Search ▾**: find rising edges, falling edges or glitches in the whole
-  record; [ and ] go to the previous and next one.
-- **⇄ Decode ▾**: protocol decoder (logic analyzer). **UART**: baud rate
-  (measured from the signal, or chosen), 5–9 data bits, parity, 1 or 2 stop
-  bits, idle high or low. It works on a digital (VCD) line or on an analog
-  channel (automatic or manual threshold). The words are drawn in a lane under
-  the traces and listed under the plot in Hex, Dec, Bin or ASCII; click a word
-  to show it; ⎘ Copy copies them all. Parity and framing errors are in the
-  warning colour. The decoders are in `src/decode/` (one file per protocol);
-  I2C and SPI can be added the same way. To try it: File ▾ → Open example →
-  Logic (VCD) → **UART: complete session (4 lines)**.
-- **▤ Measure → Statistics per cycle**: mean, min, max, σ and n of the time
-  measurements, in a floating window.
-- **∿ FFT ▾** menu: spectrum of CH1 or CH2 under the plot, of the samples
-  shown in the time plot (zoom in to analyse a part). Windows Rectangular,
-  Hanning, Hamming, Blackman-Harris and Flat top; scale dBV or V RMS; drawn
-  as a line or as bars (one bar per frequency bin); peak readout (frequency
-  interpolated between bins), Δf and N. The wheel zooms and a drag pans the
-  spectrum; **⛶ Fit** next to the readouts (or a double-click) returns to the
-  start view.
-- **▤ Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
-  Vmax, Vmin, Vtop, Vbase, Vamp, Mean, RMS, Rise, Fall, +Width, −Width, +Duty),
-  the channels, and the samples to measure: **Screen** (the time span shown
-  now), **Record** (the whole file) or **T1–T2** (between the time cursors).
-  The choice is saved between sessions.
-  - Vtop and Vbase are the most common high and low levels (histogram).
-  - Edges use the 10%, 50% and 90% levels between Vbase and Vtop, with
-    hysteresis. Glitches (two edges closer than 10% of the typical edge
-    spacing) are ignored.
-  - With an amplitude below 0.1 division, the signal is taken as noise and
-    the time measurements show "—".
-- Readouts use 4 significant digits, and never more resolution than the
-  samples have (one ADC code for voltages; Rise/Fall shorter than 2 samples
-  show "<…"). If the signal is clipped in the measured window, its voltage
-  measurements are orange and start with "?": the real value can be larger.
-- If a file cannot be opened, a banner says why; the file shown before stays.
-- The time axis has the trigger at t = 0 (the "T" marker on the top edge). The voltage axis is in volts at the
-  probe tip (the V/div that the scope shows already includes the probe setting).
+- Drop a file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
+- **File ▾ → Open example**: real FNIRSI 1013D and Rigol captures, and VCD
+  files made for the viewer (a CPU bus, a DAC, and three UART examples).
+- The welcome screen lists all the controls; **? Help** (F1) has the main
+  instructions.
+- Keyboard: Ctrl/⌘+O open, Ctrl/⌘+P print, F1 help, F/H/V fit, Z zoom view,
+  S FFT, Y volts/div, C cursors, Tab + arrows move a cursor, 1/2 hide a
+  channel, +/− zoom, arrows pan, [ and ] previous/next search result.
 
 ## Build and run
 
@@ -266,7 +369,10 @@ The files in `assets/examples/rigol/` are Rigol captures (DHO1074 and MSO5000
 `assets/examples/rigol/LICENSE.txt`). They are not changed.
 
 The files in `assets/examples/vcd/` are not captures: `scripts/make-vcd-examples.py`
-makes them (a CPU bus with write and read cycles, and an 8-bit DAC with its
-analog output). Run the script again to make the same files.
+makes them (a CPU bus with write and read cycles, an 8-bit DAC with its analog
+output, and three UART examples). Run the script again to make the same files.
+
+The images in `docs/images/` are screenshots of this viewer with the example
+files above.
 
 There are no DPOX180H examples: the only public DPOX180H files have no license.
