@@ -473,8 +473,8 @@ fn ds2000(b: &[u8]) -> Result<Parsed, ReadError> {
         let (t16, t17) = (b[head + 16], b[head + 17]);
         let legacy = enabled_temp == 1;
         let (inv, unit) = if legacy { (t16, t17) } else { (t17, t16) };
-        // A 1X probe can be stored as 0.01X with 50 Ω on newer firmware.
-        let ratio = if !legacy && ratio == 0 && impedance == 1 {
+        // Newer firmware stores a 1X probe as 0.01X with 50 Ω (code 0).
+        let ratio = if !legacy && ratio == 0 && impedance == 0 {
             6
         } else {
             ratio

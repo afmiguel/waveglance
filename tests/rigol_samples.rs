@@ -147,6 +147,15 @@ fn wfm_files_open() {
         let t = w.time_per_div.unwrap();
         assert!((t - tdiv).abs() < tdiv * 1e-6, "{name}: {t}");
     }
+    // Probe factors: DS1000Z 10X, DS2000 newer firmware 1X (stored as
+    // 0.01X with 50 Ω), DS2000 older firmware 10X.
+    for (name, probe) in [
+        ("DS1054Z-ch1SquareCH2Uart.wfm", 10.0),
+        ("DS2072A-9.wfm", 1.0),
+        ("DS2000-A.wfm", 10.0),
+    ] {
+        assert_eq!(load(name).traces[0].display.probe, probe, "{name}");
+    }
     // Only logic analyzer data: no analog channel is on.
     assert!(formats::open(&bytes("DS1074Z-C.wfm")).is_err());
 }

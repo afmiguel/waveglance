@@ -5,6 +5,10 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.14.1 — 2026-11-07
+
+- Rigol DS2000 `.wfm` (newer firmware): a 1X probe was shown as 0.01X.
+
 ## 0.14.0 — 2026-11-07
 
 - **Rigol `.wfm`** files of three families:
