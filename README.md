@@ -197,6 +197,20 @@ of files saved on a real DPOX180H, with one setting changed in each file.
 - The sample rate in real-time mode is verified only at 400 MS/s.
 - A ground marker far from the centre, and slow (roll) timebases.
 
+### Copying files from the DPOX180H
+
+The USB disk of the DPOX180H can disconnect during a copy with `cp` or the
+Finder ("Device not configured"); the scope must then be switched off and on.
+`scripts/copy-dpox.py` reads in small pieces and waits for the disk to come
+back:
+
+```bash
+python3 scripts/copy-dpox.py ~/Downloads/dpox
+```
+
+Connect the scope directly to the computer (not through a dock or hub) and do
+not open the disk in the Finder during the copy.
+
 ## File format: 1013D / 1014D
 
 15000 bytes, little-endian. Bytes 0–999 are the header; CH2 settings are at the
