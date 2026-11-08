@@ -5,6 +5,11 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.23.1 — 2026-11-08
+
+- Fix: in Decode ▾, a click on the Baud list closed the Decode menu. The
+  baud rates are now a submenu (Baud: Auto ▸), and the menu stays open.
+
 ## 0.23.0 — 2026-11-08
 
 - **Decoded words on the signal**, like a logic analyzer (Saleae): the UART

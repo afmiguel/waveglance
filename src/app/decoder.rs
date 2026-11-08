@@ -313,15 +313,16 @@ fn uart_settings(ui: &mut egui::Ui, s: &mut uart::Settings) {
             } else {
                 s.baud.to_string()
             };
-            egui::ComboBox::from_id_salt("uart_baud")
-                .selected_text(text)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.baud, 0, "Auto")
-                        .on_hover_text("Measured from the shortest pulse");
-                    for b in uart::STANDARD_BAUDS {
-                        ui.selectable_value(&mut s.baud, b, b.to_string());
-                    }
-                });
+            // A submenu, not a ComboBox: a ComboBox opens a popup of its
+            // own, and a click in it closes the Decode menu.
+            ui.menu_button(format!("{text} ▸"), |ui| {
+                ui.selectable_value(&mut s.baud, 0, "Auto")
+                    .on_hover_text("Measured from the shortest pulse");
+                ui.separator();
+                for b in uart::STANDARD_BAUDS {
+                    ui.selectable_value(&mut s.baud, b, b.to_string());
+                }
+            });
             ui.end_row();
             ui.label("Data bits:");
             ui.horizontal(|ui| {

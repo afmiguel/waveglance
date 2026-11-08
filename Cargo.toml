@@ -1,6 +1,6 @@
 [package]
 name = "fnirsi-viewer"
-version = "0.23.0"
+version = "0.23.1"
 edition = "2024"
 description = "Viewer for the binary .wav waveform files of the FNIRSI DPOX180H oscilloscope"
 
