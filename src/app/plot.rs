@@ -501,13 +501,20 @@ impl ScopeApp {
             .bus_hover(ui.ctx(), &maps)
             .or_else(|| self.decode_hover(ui.ctx()));
         // The decoder lane: its corners keep it in the automatic bounds.
-        let decode_corners: Vec<[f64; 2]> = match (self.decode_band(), record_span.as_ref()) {
-            (Some((near, far)), Some(span)) => {
-                let (lo, hi) = (near.min(far), near.max(far));
-                let (a, b) = (*span.start(), *span.end());
-                vec![[a, lo], [a, hi], [b, hi], [b, lo]]
-            }
-            _ => Vec::new(),
+        // The bands of the decoded words: their corners keep them in the
+        // automatic bounds.
+        let decoded_lines = self.decoded_lines();
+        let decode_corners: Vec<[f64; 2]> = match record_span.as_ref() {
+            Some(span) => decoded_lines
+                .iter()
+                .filter_map(|&i| self.decode_band(i))
+                .flat_map(|(near, far)| {
+                    let (lo, hi) = (near.min(far), near.max(far));
+                    let (a, b) = (*span.start(), *span.end());
+                    [[a, lo], [a, hi], [b, hi], [b, lo]]
+                })
+                .collect(),
+            None => Vec::new(),
         };
         let logic_only = lane_top == Some(f64::INFINITY);
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
@@ -796,33 +803,31 @@ impl ScopeApp {
             self.bus_radix,
         );
         // A decoded digital line: its name goes above its words.
-        let decoded_digital = (self.decode_lanes() > 0)
-            .then(|| self.decode_source())
-            .flatten();
+        let decoded_digital: Vec<usize> = decoded_lines
+            .iter()
+            .copied()
+            .filter(|&i| self.traces()[i].is_digital())
+            .collect();
         draw_lane_labels(
             ui,
             &response.transform,
             self.traces(),
             &maps,
-            decoded_digital,
+            &decoded_digital,
         );
-        if let (Some(d), Some(band), Some(source)) =
-            (self.decoded(), self.decode_band(), self.decode_source())
-        {
-            let label = format!(
-                "{} · {}",
-                self.traces()[source].label,
-                self.decode.protocol.label()
-            );
-            draw_decode_lane(
-                ui,
-                &response.transform,
-                &d,
-                band,
-                self.decode_radix,
-                palette::channel(source),
-                &label,
-            );
+        for &line in &decoded_lines {
+            if let (Some(d), Some(band)) = (self.decoded_at(line), self.decode_band(line)) {
+                let label = format!("{} · UART", self.traces()[line].label);
+                draw_decode_lane(
+                    ui,
+                    &response.transform,
+                    &d,
+                    band,
+                    self.decode_radix,
+                    palette::channel(line),
+                    &label,
+                );
+            }
         }
         if on_plot {
             let pos = ui.ctx().input(|i| i.pointer.latest_pos());
@@ -1191,12 +1196,12 @@ pub(super) fn draw_lane_labels(
     transform: &PlotTransform,
     traces: &[Trace],
     maps: &[Option<YMap>],
-    skip: Option<usize>,
+    skip: &[usize],
 ) {
     let frame = *transform.frame();
     let painter = ui.painter_at(frame);
     for (i, (t, map)) in traces.iter().zip(maps).enumerate() {
-        let Some(map) = map.filter(|_| t.is_digital() && skip != Some(i)) else {
+        let Some(map) = map.filter(|_| t.is_digital() && !skip.contains(&i)) else {
             continue;
         };
         let y = transform.position_from_point_y(map.to_plot(1.0)) - 2.0;

@@ -3,64 +3,93 @@
 
 use super::*;
 use crate::decode::{self, Decoded, Protocol, uart};
+use crate::model::Trace;
 
-/// Most words written in the decoder row (the lane shows all of them).
+/// Most words written in a decoder row (the plot shows all of them).
 const ROW_MAX_WORDS: usize = 400;
+/// Decode results kept (one per decoded line and settings).
+const CACHE_LEN: usize = 16;
 
-/// What a decode result depends on: the file and the settings.
-pub(super) type DecodeKey = (u64, decode::Settings);
+/// What a decode result depends on: the file, the line and the settings.
+pub(super) type DecodeKey = (u64, String, decode::Settings);
+
+/// The decoder of one line (saved between sessions, found by the name of
+/// the line, so that it works again on the next file with that line).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) struct LineDecoder {
+    pub label: String,
+    pub on: bool,
+    pub settings: decode::Settings,
+}
+
+impl LineDecoder {
+    fn new(label: &str) -> Self {
+        Self {
+            label: label.to_owned(),
+            on: false,
+            settings: decode::Settings {
+                protocol: Protocol::Uart,
+                ..Default::default()
+            },
+        }
+    }
+}
 
 impl ScopeApp {
-    /// The trace to decode: the chosen one if the file has it (and it is not
-    /// a bus), else the first trace that is not a bus.
-    pub(super) fn decode_source(&self) -> Option<usize> {
-        if self.decode.protocol == Protocol::Off {
-            return None;
-        }
-        let t = self.traces();
-        if t.get(self.decode.source).is_some_and(|t| !t.is_bus()) {
-            Some(self.decode.source)
-        } else {
-            t.iter().position(|t| !t.is_bus())
-        }
+    /// The settings of the decoder of trace `i`, if it is on.
+    fn line_settings(&self, i: usize) -> Option<decode::Settings> {
+        let t = self.traces().get(i).filter(|t| !t.is_bus())?;
+        self.decoders
+            .iter()
+            .find(|d| d.on && d.label == t.label && d.settings.protocol != Protocol::Off)
+            .map(|d| d.settings)
     }
 
-    /// 1 when the decoder decodes a digital trace (its words need room
-    /// above the signal, `DECODE_ROOM` lanes), else 0.
+    /// The traces that are decoded, in trace order.
+    pub(super) fn decoded_lines(&self) -> Vec<usize> {
+        (0..self.traces().len())
+            .filter(|&i| self.line_settings(i).is_some())
+            .collect()
+    }
+
+    /// Decoded digital traces: each has `DECODE_ROOM` lanes of room above
+    /// it for its words.
     pub(super) fn decode_lanes(&self) -> usize {
-        usize::from(
-            self.decode_source()
-                .is_some_and(|i| self.traces()[i].is_digital()),
-        )
+        self.decoded_lines()
+            .into_iter()
+            .filter(|&i| self.traces()[i].is_digital())
+            .count()
     }
 
-    /// The decode result for the current file and settings (kept until
-    /// they change).
-    pub(super) fn decoded(&self) -> Option<Rc<Decoded>> {
-        let source = self.decode_source()?;
-        let mut settings = self.decode;
-        settings.source = source;
-        let key = (self.load_count, settings);
-        if let Some((k, d)) = &*self.decode_cache.borrow()
-            && *k == key
-        {
+    /// The decode result of trace `i` (kept until the file or the
+    /// settings change).
+    pub(super) fn decoded_at(&self, i: usize) -> Option<Rc<Decoded>> {
+        let settings = self.line_settings(i)?;
+        let trace = &self.traces()[i];
+        let key = (self.load_count, trace.label.clone(), settings);
+        if let Some((_, d)) = self.decode_cache.borrow().iter().find(|(k, _)| *k == key) {
             return d.clone();
         }
-        let d = decode::decode(&self.traces()[source], &settings).map(Rc::new);
-        *self.decode_cache.borrow_mut() = Some((key, d.clone()));
+        let d = decode::decode(trace, &settings).map(Rc::new);
+        let mut cache = self.decode_cache.borrow_mut();
+        cache.retain(|(k, _)| k.0 == self.load_count);
+        if cache.len() >= CACHE_LEN {
+            cache.remove(0);
+        }
+        cache.push((key, d.clone()));
         d
     }
 
     /// The room for the decoded words, in plot units: (near, far), `near`
     /// on the side of the signal. The words are drawn from `near`, with a
-    /// fixed height on the screen. Just above the signal. A digital line: in the lane kept free above it. An
+    /// fixed height on the screen. Just above the signal of trace `i`. A
+    /// digital line: in the room kept free above it. An
     /// analog channel: above its highest sample (in Div mode, below its
     /// lowest sample when there is no room above in the 8 divisions).
     /// `None` if the trace is hidden.
-    pub(super) fn decode_band(&self) -> Option<(f64, f64)> {
-        let source = self.decode_source()?;
-        let map = self.y_maps().get(source).copied().flatten()?;
-        let trace = &self.traces()[source];
+    pub(super) fn decode_band(&self, i: usize) -> Option<(f64, f64)> {
+        let map = self.y_maps().get(i).copied().flatten()?;
+        let trace = &self.traces()[i];
         if trace.is_digital() {
             // One lane of room: from just above the high level.
             let lanes = self.total_lanes().max(2.0);
@@ -69,7 +98,7 @@ impl ScopeApp {
             // The gap between lanes (0.3) and the room kept above the line.
             return Some((top + 0.06 * pitch, top + (0.3 + DECODE_ROOM - 0.04) * pitch));
         }
-        let d = self.decoded()?;
+        let d = self.decoded_at(i)?;
         if !d.high.is_finite() {
             return None;
         }
@@ -97,135 +126,121 @@ impl ScopeApp {
     /// The decoded word under the pointer, for the hover label.
     pub(super) fn decode_hover(&self, ctx: &egui::Context) -> Option<String> {
         let transform = self.last_transform.as_ref()?;
-        let band = self.decode_band()?;
         let pos = ctx.input(|i| i.pointer.latest_pos())?;
-        let (near, far) = band_pixels(transform, band);
-        if !(near.min(far)..=near.max(far)).contains(&pos.y) {
-            return None;
-        }
         let at = transform.value_from_position(pos);
-        let d = self.decoded()?;
-        let i = d.frames.partition_point(|f| f.end < at.x);
-        let f = d.frames.get(i).filter(|f| f.start <= at.x)?;
-        let mut text = format!(
-            "#{} = {} (hex) = {} = '{}'",
-            i + 1,
-            word_text(f.value, f.bits, Radix::Hex),
-            f.value,
-            decode::ascii(f.value)
-        );
-        if let Some(e) = f.error {
-            text.push_str(&format!("\n⚠ {}", e.label()));
-        }
-        Some(text)
+        self.decoded_lines().into_iter().find_map(|line| {
+            let (near, far) = band_pixels(transform, self.decode_band(line)?);
+            if !(near.min(far)..=near.max(far)).contains(&pos.y) {
+                return None;
+            }
+            let d = self.decoded_at(line)?;
+            let i = d.frames.partition_point(|f| f.end < at.x);
+            let f = d.frames.get(i).filter(|f| f.start <= at.x)?;
+            let mut text = format!(
+                "{} #{} = {} (hex) = {} = '{}'",
+                self.traces()[line].label,
+                i + 1,
+                word_text(f.value, f.bits, Radix::Hex),
+                f.value,
+                decode::ascii(f.value)
+            );
+            if let Some(e) = f.error {
+                text.push_str(&format!("\n⚠ {}", e.label()));
+            }
+            Some(text)
+        })
     }
 
-    /// Contents of the Decode menu.
+    /// Contents of the Decode menu: a check box per line, and the settings
+    /// of each decoded line in its own submenu.
     pub(super) fn decode_menu(&mut self, ui: &mut egui::Ui) {
-        let mut s = self.decode;
-        ui.label("Protocol:");
+        ui.label("UART on the lines checked:");
+        // What the rows need, read before the decoders are changed.
+        let rows: Vec<(usize, String, bool, Option<f64>)> = self
+            .traces()
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let threshold = self.decoded_at(i).map(|d| d.threshold);
+                (i, t.label.clone(), t.is_bus(), threshold)
+            })
+            .collect();
+        let digital: Vec<bool> = self.traces().iter().map(Trace::is_digital).collect();
+        let mut decoders = self.decoders.clone();
+        egui::Grid::new("decode_lines")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                for (i, label, bus, threshold) in rows {
+                    let k = match decoders.iter().position(|d| d.label == label) {
+                        Some(k) => k,
+                        None => {
+                            decoders.push(LineDecoder::new(&label));
+                            decoders.len() - 1
+                        }
+                    };
+                    let d = &mut decoders[k];
+                    ui.add_enabled(
+                        !bus,
+                        egui::Checkbox::new(
+                            &mut d.on,
+                            RichText::new(&label).color(palette::channel(i)),
+                        ),
+                    )
+                    .on_disabled_hover_text("A bus has values, not one line");
+                    if d.on && !bus {
+                        ui.menu_button(format!("{} ▸", summary(&d.settings)), |ui| {
+                            ui.label(RichText::new(format!("UART on {label}")).strong());
+                            uart_settings(ui, &label, &mut d.settings.uart);
+                            if !digital[i] {
+                                ui.separator();
+                                threshold_setting(ui, &mut d.settings.threshold, threshold);
+                            }
+                        })
+                        .response
+                        .on_hover_text("The UART settings of this line");
+                    }
+                    ui.end_row();
+                }
+            });
+        // Lines that are not in this file keep their settings for later.
+        self.decoders = decoders;
+        ui.separator();
+        ui.label("Show:");
         ui.horizontal(|ui| {
-            for p in Protocol::ALL {
-                ui.radio_value(&mut s.protocol, p, p.label());
+            for r in Radix::ALL {
+                ui.radio_value(&mut self.decode_radix, r, r.label());
             }
         });
-        if s.protocol != Protocol::Off {
-            ui.separator();
-            ui.label("Data line:");
-            let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
-            let buses = self.bus_flags();
-            let source = self.decode_source();
-            ui.horizontal_wrapped(|ui| {
-                for (i, name) in labels.iter().enumerate() {
-                    if ui
-                        .add_enabled(
-                            !buses[i],
-                            egui::RadioButton::new(
-                                source == Some(i),
-                                RichText::new(name).color(palette::channel(i)),
-                            ),
-                        )
-                        .on_disabled_hover_text("A bus has values, not one line")
-                        .clicked()
-                    {
-                        s.source = i;
-                    }
-                }
-            });
-            if s.protocol == Protocol::Uart {
-                ui.separator();
-                uart_settings(ui, &mut s.uart);
-            }
-            // Threshold of an analog line.
-            if let Some(t) = source.and_then(|i| self.traces().get(i))
-                && !t.is_digital()
-            {
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Threshold:");
-                    let mut auto = s.threshold.is_none();
-                    if ui
-                        .checkbox(&mut auto, "Auto")
-                        .on_hover_text("The middle between the lowest and the highest sample")
-                        .changed()
-                    {
-                        s.threshold = if auto {
-                            None
-                        } else {
-                            Some(self.decoded().map_or(0.0, |d| d.threshold))
-                        };
-                    }
-                    if let Some(v) = &mut s.threshold {
-                        ui.add(
-                            egui::DragValue::new(v)
-                                .speed(0.01)
-                                .suffix(" V")
-                                .max_decimals(3),
-                        );
-                    } else if let Some(d) = self.decoded() {
-                        ui.label(
-                            RichText::new(si(d.threshold, "V"))
-                                .monospace()
-                                .color(palette::fg_dim()),
-                        );
-                    }
-                });
-            }
-            ui.separator();
-            ui.label("Show:");
-            ui.horizontal(|ui| {
-                for r in Radix::ALL {
-                    ui.radio_value(&mut self.decode_radix, r, r.label());
-                }
-            });
-        }
-        self.decode = s;
         ui.separator();
         ui.label(
             RichText::new(
-                "The words are drawn just above the signal and listed under the plot. \
-                 Click a word in the list to show it.",
+                "Each line has its own settings (▸). The words are drawn just above \
+                 the signal and listed under the plot; click a word in the list to show it.",
             )
             .small()
             .color(palette::hint()),
         );
     }
 
-    /// The row of decoded words under the plot.
+    /// The rows of decoded words under the plot: one block per line.
     pub(super) fn decode_readout(&mut self, ui: &mut egui::Ui) {
-        let (Some(d), Some(source)) = (self.decoded(), self.decode_source()) else {
-            return;
-        };
-        let color = palette::channel(source);
-        let label = self.traces()[source].label.clone();
+        for (n, line) in self.decoded_lines().into_iter().enumerate() {
+            if let Some(d) = self.decoded_at(line) {
+                self.decode_line_readout(ui, line, &d, n == 0);
+            }
+        }
+    }
+
+    /// The block of one decoded line: its name, settings, word count, and
+    /// the words. `first`: also the Hex/Dec/Bin/ASCII choice.
+    fn decode_line_readout(&mut self, ui: &mut egui::Ui, line: usize, d: &Decoded, first: bool) {
+        let color = palette::channel(line);
+        let label = self.traces()[line].label.clone();
         let radix = self.decode_radix;
         let errors = d.frames.iter().filter(|f| f.error.is_some()).count();
         ui.horizontal_wrapped(|ui| {
-            tag(
-                ui,
-                &format!("{} {label}", self.decode.protocol.label()),
-                color,
-            );
+            tag(ui, &format!("UART {label}"), color);
             ui.label(RichText::new(&d.title).monospace().color(palette::fg_dim()));
             let mut count = format!("{} words", d.frames.len());
             if errors > 0 {
@@ -236,16 +251,18 @@ impl ScopeApp {
             } else {
                 palette::fg_dim()
             }));
-            for r in Radix::ALL {
-                ui.radio_value(&mut self.decode_radix, r, r.label());
+            if first {
+                for r in Radix::ALL {
+                    ui.radio_value(&mut self.decode_radix, r, r.label());
+                }
             }
             if !d.frames.is_empty()
                 && ui
                     .small_button("⎘ Copy")
-                    .on_hover_text("Copy all the words, as shown")
+                    .on_hover_text(format!("Copy all the words of {label}, as shown"))
                     .clicked()
             {
-                ui.ctx().copy_text(words_text(&d, radix));
+                ui.ctx().copy_text(words_text(d, radix));
             }
         });
         for w in &d.warnings {
@@ -266,7 +283,7 @@ impl ScopeApp {
                     color
                 };
                 let mut tip = format!(
-                    "#{} at {}\n{} (hex) = {} = '{}'",
+                    "{label} #{} at {}\n{} (hex) = {} = '{}'",
                     i + 1,
                     si(f.start, "s"),
                     word_text(f.value, f.bits, Radix::Hex),
@@ -301,9 +318,63 @@ impl ScopeApp {
     }
 }
 
-/// The UART part of the Decode menu.
-fn uart_settings(ui: &mut egui::Ui, s: &mut uart::Settings) {
-    egui::Grid::new("uart_settings")
+/// The settings of a line in short: "Auto 8N1", "19200 7E1 inv".
+fn summary(s: &decode::Settings) -> String {
+    let u = &s.uart;
+    let baud = if u.baud == 0 {
+        "Auto".to_owned()
+    } else {
+        u.baud.to_string()
+    };
+    let parity = match u.parity {
+        uart::Parity::None => 'N',
+        uart::Parity::Even => 'E',
+        uart::Parity::Odd => 'O',
+    };
+    let mut text = format!("{baud} {}{parity}{}", u.data_bits, u.stop_bits);
+    if u.idle_low {
+        text.push_str(" inv");
+    }
+    text
+}
+
+/// The threshold of an analog line: Auto, or a value in volts. `used`: the
+/// threshold of the last decoding.
+fn threshold_setting(ui: &mut egui::Ui, threshold: &mut Option<f64>, used: Option<f64>) {
+    ui.horizontal(|ui| {
+        ui.label("Threshold:");
+        let mut auto = threshold.is_none();
+        if ui
+            .checkbox(&mut auto, "Auto")
+            .on_hover_text("The middle between the lowest and the highest sample")
+            .changed()
+        {
+            *threshold = if auto {
+                None
+            } else {
+                Some(used.unwrap_or(0.0))
+            };
+        }
+        if let Some(v) = threshold {
+            ui.add(
+                egui::DragValue::new(v)
+                    .speed(0.01)
+                    .suffix(" V")
+                    .max_decimals(3),
+            );
+        } else if let Some(v) = used {
+            ui.label(
+                RichText::new(si(v, "V"))
+                    .monospace()
+                    .color(palette::fg_dim()),
+            );
+        }
+    });
+}
+
+/// The UART settings of line `label`.
+fn uart_settings(ui: &mut egui::Ui, label: &str, s: &mut uart::Settings) {
+    egui::Grid::new(("uart_settings", label))
         .num_columns(2)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {

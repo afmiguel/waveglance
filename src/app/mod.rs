@@ -51,7 +51,7 @@ const BUS_RADIX_KEY: &str = "bus_radix";
 /// Room (in lanes) above a decoded digital line, for its words.
 const DECODE_ROOM: f64 = 0.5;
 /// Storage keys of the protocol decoder settings and of how it writes the words.
-const DECODE_KEY: &str = "decode";
+const DECODE_KEY: &str = "decoders";
 const DECODE_RADIX_KEY: &str = "decode_radix";
 /// Storage key of the FFT settings.
 const FFT_KEY: &str = "fft";
@@ -372,11 +372,11 @@ pub struct ScopeApp {
     /// How bus values are written (saved).
     bus_radix: Radix,
     /// Protocol decoder (saved).
-    decode: decode::Settings,
+    decoders: Vec<LineDecoder>,
     /// How decoded words are written (saved).
     decode_radix: Radix,
     /// The decode result of the current file and settings.
-    decode_cache: RefCell<Option<(DecodeKey, Option<Rc<decode::Decoded>>)>>,
+    decode_cache: RefCell<Vec<(DecodeKey, Option<Rc<decode::Decoded>>)>>,
     /// Screenshots arrive here (egui calls back after the frame is drawn).
     shot_tx: Sender<std::sync::Arc<egui::ColorImage>>,
     shot_rx: Receiver<std::sync::Arc<egui::ColorImage>>,
@@ -494,7 +494,7 @@ impl ScopeApp {
                 .storage
                 .and_then(|s| eframe::get_value(s, BUS_RADIX_KEY))
                 .unwrap_or_default(),
-            decode: cc
+            decoders: cc
                 .storage
                 .and_then(|s| eframe::get_value(s, DECODE_KEY))
                 .unwrap_or_default(),
@@ -502,7 +502,7 @@ impl ScopeApp {
                 .storage
                 .and_then(|s| eframe::get_value(s, DECODE_RADIX_KEY))
                 .unwrap_or_default(),
-            decode_cache: RefCell::new(None),
+            decode_cache: RefCell::new(Vec::new()),
             shot_tx,
             shot_rx,
             visible: Vec::new(),
@@ -682,9 +682,7 @@ impl ScopeApp {
         // trace that is decoded has free room above it, for the words.
         let traces = self.traces();
         let lanes = self.total_lanes();
-        let decoded = (self.decode_lanes() > 0)
-            .then(|| self.decode_source())
-            .flatten();
+        let decoded: Vec<usize> = self.decoded_lines();
         let mut lane = 0.0;
         traces
             .iter()
@@ -692,7 +690,7 @@ impl ScopeApp {
             .map(|(i, t)| {
                 if t.is_digital() {
                     // Top lane first: the first digital trace is the highest.
-                    if decoded == Some(i) {
+                    if decoded.contains(&i) {
                         lane += DECODE_ROOM;
                     }
                     let k = lanes - 1.0 - lane;
@@ -1003,7 +1001,7 @@ impl eframe::App for ScopeApp {
         if self.waveform.is_some() && self.cursors.mode != CursorMode::Off {
             egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
         }
-        if self.decode_source().is_some() {
+        if !self.decoded_lines().is_empty() {
             egui::Panel::bottom("decode_readout")
                 .resizable(false)
                 .show(ui, |ui| self.decode_readout(ui));
@@ -1044,7 +1042,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, MATH_KEY, &self.math);
         eframe::set_value(storage, CURSOR_MODE_KEY, &self.cursors.mode);
         eframe::set_value(storage, BUS_RADIX_KEY, &self.bus_radix);
-        eframe::set_value(storage, DECODE_KEY, &self.decode);
+        eframe::set_value(storage, DECODE_KEY, &self.decoders);
         eframe::set_value(storage, DECODE_RADIX_KEY, &self.decode_radix);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
     }

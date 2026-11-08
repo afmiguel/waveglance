@@ -396,8 +396,8 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         ui,
         "Protocol decoder (⇄ Decode menu)",
         &[
-            "UART: choose the data line (a channel or a VCD signal). Baud Auto measures the rate from the shortest pulse; or choose it. Data bits, parity, stop bits and the idle level as the device sends them.",
-            "An analog channel is made into 0 and 1 with a threshold: Auto (the middle of the signal, with hysteresis) or a value in volts.",
+            "UART: check each line to decode (a channel or a VCD signal); several lines can be decoded at the same time. The ▸ next to a line opens its own settings: Baud (Auto measures the rate from the shortest pulse), data bits, parity, stop bits and the idle level as the device sends them.",
+            "An analog channel is made into 0 and 1 with a threshold (in its ▸ settings): Auto (the middle of the signal, with hysteresis) or a value in volts.",
             "The words are drawn just above the decoded signal and listed in a row under the plot: Hex, Dec, Bin or ASCII. Click a word in the row to centre it; ⎘ Copy copies all of them. A word with a parity or framing error is in the warning colour.",
             "Use a time base that gives at least 4 samples per bit (10 or more is better); the row warns when there are fewer.",
         ],

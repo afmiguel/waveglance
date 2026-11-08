@@ -125,12 +125,14 @@ and `data[7:0]` in hex. X marks a bus value with unknown bits (x or z).*
 
 ### Protocol decoder: UART
 
-![UART answers decoded as ASCII from a VCD file with four serial lines](docs/images/uart-decode.png)
+![Four serial lines decoded at the same time, each with its own settings](docs/images/uart-decode.png)
 
-*VCD example "UART: complete session (4 lines)", Decode → UART on `dev_tx`
-(115200 baud, 8N1): each byte just above the signal, like a logic analyzer,
-and the whole text under the plot. The last word of the row is a break (a
-framing error, in the warning colour).*
+*VCD example "UART: complete session (4 lines)", all four lines decoded at the
+same time, each with its own settings: `host_tx` and `dev_tx` at 115200 8N1,
+`gps` at 9600 8N1, `rs232` at 19200 7E1 inverted. The bytes are just above
+each signal, like a logic analyzer, and each line's text is under the plot.
+Words with errors (the break on `dev_tx`, a parity error on `rs232`) are in
+the warning colour.*
 
 ![A noisy 3.3 V serial line decoded with an automatic threshold](docs/images/uart-analog.png)
 
@@ -139,18 +141,21 @@ as an oscilloscope sees it. The baud rate (9600) and the threshold (1.65 V)
 are found automatically. In Div mode the words go under the signal when there
 is no room above it in the 8 divisions.*
 
-**⇄ Decode ▾** makes a serial line into bytes:
+**⇄ Decode ▾** makes serial lines into bytes. Check each line to decode
+(several at the same time); the **▸** next to a line opens its own settings:
 
 - **UART**: baud rate measured from the signal (rounded to a standard rate) or
   chosen; 5 to 9 data bits; parity None, Even or Odd; 1 or 2 stop bits; idle
   high, or low (an inverted line, such as RS-232 before the transceiver).
-- The data line is a channel of the oscilloscope or a VCD signal. An analog
-  channel is made into 0 and 1 with a threshold: automatic (the middle of the
+- A line is a channel of the oscilloscope or a VCD signal. The settings are
+  kept by the name of the line, so they come back with the next file that has
+  a line with that name. An analog channel is made into 0 and 1 with a
+  threshold (in its ▸ settings): automatic (the middle of the
   signal, with hysteresis) or a value in volts.
 - The words are drawn just above the decoded signal (a small band, 22 points
   high, that keeps its size when you zoom), and listed in a row under the plot
-  in Hex, Dec, Bin or ASCII. A click on a word centres it in the plot;
-  **⎘ Copy** copies all of them. Words with a parity or framing error are in
+  in Hex, Dec, Bin or ASCII, one block per line. A click on a word centres it
+  in the plot; **⎘ Copy** copies all the words of that line. Words with a parity or framing error are in
   the warning colour. The row warns when there are fewer than 4 samples per
   bit.
 - The decoders are a module of their own (`src/decode/`, one file per

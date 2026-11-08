@@ -5,6 +5,17 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.24.0 — 2026-11-08
+
+- **Several lines decoded at the same time.** In Decode ▾ each line has a
+  check box (it was one radio button for one line), and its own UART
+  settings in a submenu (▸): for example 115200 8N1 on one line and 19200
+  7E1 inverted on another. The words of each line are drawn above that line,
+  and each line has its own block of words (and ⎘ Copy) under the plot.
+- The decoder settings are kept by the name of the line, so they come back
+  with the next file that has a line with that name. (The settings of the
+  earlier versions are not read: check the lines again.)
+
 ## 0.23.1 — 2026-11-08
 
 - Fix: in Decode ▾, a click on the Baud list closed the Decode menu. The

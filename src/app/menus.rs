@@ -357,13 +357,12 @@ impl ScopeApp {
                 |ui| self.search_menu(ui),
             );
             ui.add_space(8.0);
-            let decode_label = match self.decode_source() {
-                Some(i) => format!(
-                    "⇄ Decode: {} {} ▾",
-                    self.decode.protocol.label(),
-                    self.traces()[i].label
-                ),
-                None => "⇄ Decode ▾".to_owned(),
+            let decoded = self.decoded_lines();
+            // The count only: a name would change the width of the button,
+            // and the open menu would jump when a line is checked.
+            let decode_label = match decoded.len() {
+                0 => "⇄ Decode ▾".to_owned(),
+                n => format!("⇄ Decode: UART ×{n} ▾"),
             };
             toolbar_menu(
                 ui,

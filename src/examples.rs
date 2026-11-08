@@ -148,7 +148,7 @@ pub const EXAMPLES: &[Example] = &[
         group: "Logic (VCD)",
         label: "UART: AT command and reply",
         about: "A host sends \"AT\" on tx and the device answers \"OK\" on rx, at 115200 baud \
-                8N1. Use Decode ▾ → UART, then choose tx or rx; Show ASCII to read the text.",
+                8N1. In Decode ▾, check tx and rx; Show ASCII to read the text.",
         file: "example-vcd-uart-at.vcd",
         bytes: include_bytes!("../assets/examples/vcd/uart-at.vcd"),
     },
@@ -167,8 +167,9 @@ pub const EXAMPLES: &[Example] = &[
         about: "Four serial lines with different settings. host_tx and dev_tx: AT commands \
                 and answers, 115200 8N1, then a break on dev_tx (framing error). gps: NMEA \
                 sentences, 9600 8N1. rs232: an inverted line, 19200 7E1 (Data bits 7, \
-                Parity Even, Idle Low), with one parity error. Use Decode ▾ → UART with \
-                Baud Auto, Show ASCII, and zoom in on the fast lines.",
+                Parity Even, Idle Low), with one parity error. In Decode ▾, check the \
+                lines and set rs232 in its ▸ settings; Show ASCII, and zoom in on the \
+                fast lines.",
         file: "example-vcd-uart-session.vcd",
         bytes: include_bytes!("../assets/examples/vcd/uart-session.vcd"),
     },
