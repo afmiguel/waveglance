@@ -5,6 +5,14 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.28.0 — 2026-11-08
+
+- **New name: WaveGlance** (it was fnirsi-viewer). The viewer reads files of
+  many oscilloscopes and logic analyzers, not only FNIRSI. The repository is
+  now github.com/afmiguel/waveglance and the site
+  afmiguel.github.io/waveglance. The crate is `waveglance`; the CSV export
+  header says `# WaveGlance`.
+
 ## 0.27.0 — 2026-11-08
 
 - **SPI decoder.** In Decode ▾, check the data line (MOSI or MISO, or both)

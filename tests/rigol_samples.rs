@@ -3,10 +3,10 @@
 //!
 //! The scopes have a 1 kHz calibration output; most samples show it.
 
-use fnirsi_viewer::formats;
-use fnirsi_viewer::measure::{Measurement, measure};
-use fnirsi_viewer::model::{Capture, Samples, Trace};
 use std::path::PathBuf;
+use waveglance::formats;
+use waveglance::measure::{Measurement, measure};
+use waveglance::model::{Capture, Samples, Trace};
 
 fn bytes(name: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

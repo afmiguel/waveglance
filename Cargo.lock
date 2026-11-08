@@ -1269,24 +1269,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fnirsi-viewer"
-version = "0.27.0"
-dependencies = [
- "binrw",
- "eframe",
- "egui_plot",
- "env_logger",
- "js-sys",
- "log",
- "png",
- "rfd",
- "serde",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3805,6 +3787,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b1f9c3798725016c6ee5f2f57869ec0831e8bbc0ab0310a86e787e97f41389e"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "waveglance"
+version = "0.28.0"
+dependencies = [
+ "binrw",
+ "eframe",
+ "egui_plot",
+ "env_logger",
+ "js-sys",
+ "log",
+ "png",
+ "rfd",
+ "serde",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

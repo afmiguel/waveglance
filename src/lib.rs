@@ -1,4 +1,6 @@
-//! FNIRSI oscilloscope waveform viewer (DPOX180H, 1013D, 1014D) (desktop and WebAssembly).
+//! WaveGlance: a viewer for oscilloscope and logic analyzer files (FNIRSI,
+//! Keysight, Rigol, VCD, CSV), with measurements, FFT and protocol decoders
+//! (desktop and WebAssembly).
 
 pub mod app;
 pub mod cursors;

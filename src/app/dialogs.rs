@@ -14,7 +14,7 @@ impl ScopeApp {
         let modal =
             egui::Modal::new(egui::Id::unique("splash")).show(ctx, |ui| {
                 ui.set_max_width(460.0);
-                ui.heading("FNIRSI Viewer");
+                ui.heading("WaveGlance");
                 ui.label(
                     RichText::new(format!("Version {VERSION} · commit {GIT_HASH}"))
                         .small()
@@ -310,7 +310,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         }
     };
     ui.label(
-        RichText::new(format!("FNIRSI Viewer {VERSION} · commit {GIT_HASH}"))
+        RichText::new(format!("WaveGlance {VERSION} · commit {GIT_HASH}"))
             .small()
             .color(palette::hint()),
     );

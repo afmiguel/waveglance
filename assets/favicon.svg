@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- FNIRSI Viewer icon: a small scope screen with a yellow sine (CH1) and a cyan square wave (CH2). -->
+  <!-- WaveGlance icon: a small scope screen with a yellow sine (CH1) and a cyan square wave (CH2). -->
   <rect x="2" y="2" width="60" height="60" rx="10" fill="#0a0a0a" stroke="#5a5a5a" stroke-width="3"/>
   <g stroke="#3a3a3a" stroke-width="1.5">
     <line x1="32" y1="8" x2="32" y2="56"/>

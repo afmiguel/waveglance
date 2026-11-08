@@ -3,10 +3,10 @@
 //! Expected values come from the `.txt` file that the scope saved with each
 //! capture (settings and its own measurements).
 
-use fnirsi_viewer::formats;
-use fnirsi_viewer::measure::{Measurement, measure};
-use fnirsi_viewer::model::{Capture, Unit};
 use std::path::PathBuf;
+use waveglance::formats;
+use waveglance::measure::{Measurement, measure};
+use waveglance::model::{Capture, Unit};
 
 fn load(name: &str) -> Capture {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

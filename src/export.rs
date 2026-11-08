@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 /// value of each trace (traces with the same sample times share the lines).
 pub fn csv(w: &Capture, file_name: &str, app_version: &str) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "# FNIRSI Viewer {app_version}");
+    let _ = writeln!(out, "# WaveGlance {app_version}");
     let _ = writeln!(out, "# file: {file_name}; source: {}", w.source.title());
     if let Some(t) = w.time_per_div {
         let _ = writeln!(out, "# time/div: {} s", num(t));
@@ -162,7 +162,7 @@ pub fn save(
 pub fn print_png(png: &[u8]) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let path = std::env::temp_dir().join("fnirsi-viewer-print.png");
+        let path = std::env::temp_dir().join("waveglance-print.png");
         std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
         #[cfg(target_os = "macos")]
         let mut command = std::process::Command::new("open");

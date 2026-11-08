@@ -69,10 +69,7 @@ impl ScopeApp {
         if let Some(light) = job.restore_light {
             self.set_light_theme(ctx, light);
         }
-        let base = self
-            .file_name
-            .as_deref()
-            .map_or("fnirsi-viewer", export::stem);
+        let base = self.file_name.as_deref().map_or("waveglance", export::stem);
         let result = export::png(&image).and_then(|png| match job.purpose {
             ShotPurpose::Save => export::save(
                 &format!("{base}.png"),

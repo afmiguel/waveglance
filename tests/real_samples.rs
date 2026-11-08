@@ -4,9 +4,9 @@
 //! `*_src.png` screenshots in the source repository and the thumbnail
 //! that each file contains).
 
-use fnirsi_viewer::formats;
-use fnirsi_viewer::model::{Acquisition, Capture, Coupling, Trace};
 use std::path::PathBuf;
+use waveglance::formats;
+use waveglance::model::{Acquisition, Capture, Coupling, Trace};
 
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/dpox180h")
@@ -184,7 +184,7 @@ fn all_sample_files_parse() {
 #[test]
 fn measurements_of_the_100khz_square() {
     // Scope screen: F 99.98 kHz, Vpp 1.07 V. The signal has short glitches.
-    use fnirsi_viewer::measure::{Measurement, measure};
+    use waveglance::measure::{Measurement, measure};
     let w = load("100kHZ-1V.wav");
     let ch1 = w.trace("CH1").unwrap();
     for window in [-60e-6..=60e-6, -30e-6..=30e-6] {
@@ -202,7 +202,7 @@ fn measurements_of_the_100khz_square() {
 fn fft_of_the_100khz_square() {
     // Square wave ±0.467 V (Vtop/Vbase): the fundamental is at 100 kHz with
     // an amplitude of 4/π × 0.467 V, so 0.42 V RMS.
-    use fnirsi_viewer::fft::{Window, spectrum};
+    use waveglance::fft::{Window, spectrum};
     let w = load("100kHZ-1V.wav");
     let ch1 = w.trace("CH1").unwrap();
     let values: Vec<f64> = ch1.points().iter().map(|p| p[1]).collect();

@@ -1,12 +1,18 @@
 [package]
-name = "fnirsi-viewer"
-version = "0.27.0"
+name = "waveglance"
+version = "0.28.0"
 edition = "2024"
-description = "Viewer for the binary .wav waveform files of the FNIRSI DPOX180H oscilloscope"
+description = "Viewer for oscilloscope and logic analyzer files (FNIRSI, Keysight, Rigol, VCD, CSV), with measurements, FFT and UART/I2C/SPI decoders"
 
 [lib]
 # cdylib: the WebAssembly build (Trunk) starts from lib.rs.
 crate-type = ["cdylib", "rlib"]
+
+# The desktop program. Not named like the library: the WebAssembly build
+# would make two waveglance.wasm files.
+[[bin]]
+name = "waveglance-desktop"
+path = "src/main.rs"
 
 [dependencies]
 binrw = "=0.15.2"

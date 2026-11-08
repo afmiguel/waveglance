@@ -7,15 +7,15 @@ fn main() -> eframe::Result {
     env_logger::init();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("FNIRSI Viewer")
+            .with_title("WaveGlance")
             .with_inner_size([1100.0, 700.0])
             .with_drag_and_drop(true),
         ..Default::default()
     };
     eframe::run_native(
-        "FNIRSI Viewer",
+        "WaveGlance",
         options,
-        Box::new(|cc| Ok(Box::new(fnirsi_viewer::ScopeApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(waveglance::ScopeApp::new(cc)))),
     )
 }
 

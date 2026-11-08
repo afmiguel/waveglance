@@ -1,9 +1,13 @@
-# fnirsi-viewer
+# WaveGlance
 
-A viewer for oscilloscope and logic analyzer files: FNIRSI `.wav` files,
-Keysight/Agilent and Rigol files, VCD files and CSV tables. It runs on the
-desktop and in a web browser (WebAssembly), with no installation:
-**<https://afmiguel.github.io/fnirsi-viewer/>**.
+A quick look at oscilloscope and logic analyzer files: FNIRSI `.wav` files,
+Keysight/Agilent and Rigol files, VCD files and CSV tables, with measurements,
+cursors, FFT and UART, I2C and SPI decoders. It runs on the desktop and in a
+web browser (WebAssembly), with no installation:
+**<https://afmiguel.github.io/waveglance/>**.
+
+*WaveGlance was called fnirsi-viewer up to version 0.27: it started as a
+viewer for FNIRSI files only.*
 
 ![Two channels of a FNIRSI 1013D in Div mode, with time cursors, measurements and the Math channel CH1 − CH2](docs/images/two-channels-math.png)
 
@@ -273,7 +277,7 @@ trunk serve --release
 Static build for GitHub Pages (the site is served from `/<repository>/`):
 
 ```bash
-trunk build --release --public-url /fnirsi-viewer/
+trunk build --release --public-url /waveglance/
 ```
 
 Then publish the `dist/` folder. The workflow `.github/workflows/pages.yml` does

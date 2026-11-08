@@ -3,10 +3,10 @@
 //! Expected values were read from the screenshots of the same captures
 //! (lexus2026HA/FNIRSI-2C53T-Decoder, tests/test_1013d.py).
 
-use fnirsi_viewer::formats;
-use fnirsi_viewer::measure::{Measurement, measure};
-use fnirsi_viewer::model::{Capture, Coupling};
 use std::path::PathBuf;
+use waveglance::formats;
+use waveglance::measure::{Measurement, measure};
+use waveglance::model::{Capture, Coupling};
 
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/fnirsi1013d")

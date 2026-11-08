@@ -215,7 +215,7 @@ impl ScopeApp {
             // The model comes from the loaded file.
             let title = match &self.waveform {
                 Some(w) => w.source.title(),
-                None => "FNIRSI Viewer".to_owned(),
+                None => "WaveGlance".to_owned(),
             };
             ui.label(RichText::new(title).strong().color(palette::fg_dim()))
                 .on_hover_text("Reads FNIRSI DPOX180H and 1013D/1014D .wav, Keysight/Agilent .bin, Rigol .bin and .wfm, VCD, and CSV files of any oscilloscope");
@@ -225,7 +225,7 @@ impl ScopeApp {
                     .small()
                     .color(palette::hint()),
             )
-            .on_hover_text(format!("fnirsi-viewer {VERSION}, commit {GIT_HASH}"));
+            .on_hover_text(format!("WaveGlance {VERSION}, commit {GIT_HASH}"));
             ui.add_space(8.0);
             ui.menu_button("⏏ File ▾", |ui| {
                 ui.style_mut().wrap_mode = None;
