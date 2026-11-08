@@ -12,7 +12,8 @@ not certain, a window asks):
 | 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
 | Keysight / Agilent | `.bin` (AG01, AG03, AG10) | Up to 4 channels; volts or amperes; no V/div in the file (a V/div that fits is used) |
 | VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, `real` variables as analog traces; buses not shown yet |
-| Rigol | `.bin` (MSO5000 RG01, DHO800/1000 RG03) | Same layout as Keysight `.bin`; `.wfm` not read yet |
+| Rigol | `.bin` (MSO5000 RG01, DHO800/1000 RG03) | Same layout as Keysight `.bin` |
+| Rigol | `.wfm` (DS1000Z, DS1000E/D, DS2000) | V/div, probe, coupling and time/div from the file; 8-bit samples. Logic analyzer data is not read |
 | CSV / text, any oscilloscope | `.csv`, `.txt`: time + channel columns | Keysight, Rigol, Tektronix, Siglent layouts and this viewer's export; `,` `;` tab separators |
 
 These `.wav` files are **not** audio files. Each model has its own binary

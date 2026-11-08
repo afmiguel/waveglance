@@ -5,6 +5,23 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.14.0 — 2026-11-07
+
+- **Rigol `.wfm`** files of three families:
+  - DS1000Z (DS1054Z, DS1074Z, DS1104Z, DS1202Z-E, MSO1104Z…);
+  - DS1000E/D (DS1052E, DS1102E, DS1102D…);
+  - DS2000 (DS2072A, DS2202…).
+  The V/div, probe, coupling, 0 V position and time/div come from the file.
+  The layouts come from the RigolWFM project (BSD 3-Clause).
+- Tested with 37 real files: 36 open. DS1074Z-C has only logic analyzer
+  data and is refused with a message. Logic analyzer channels are not read.
+- Checked against the CSV files that the scopes saved:
+  - DS1000E and DS2000: the samples match at the same times (most within
+    1 ADC code).
+  - DS1000Z: the CSV holds other samples than the `.wfm`, so the levels and
+    the value distribution are compared (as RigolWFM does).
+- The Open file dialog lists `.wfm` files.
+
 ## 0.13.0 — 2026-11-07
 
 - **Rigol examples** in File → Open example: DHO1074 and MSO5000 `.bin`

@@ -101,9 +101,10 @@ impl ScopeApp {
             let _ = ctx;
             let picked = rfd::FileDialog::new()
                 .add_filter(
-                    "Waveform (.wav, .bin, .vcd, .csv)",
+                    "Waveform (.wav, .bin, .wfm, .vcd, .csv)",
                     &[
-                        "wav", "WAV", "bin", "BIN", "vcd", "VCD", "csv", "CSV", "txt", "TXT",
+                        "wav", "WAV", "bin", "BIN", "wfm", "WFM", "vcd", "VCD", "csv", "CSV",
+                        "txt", "TXT",
                     ],
                 )
                 .add_filter("All files", &["*"])
@@ -123,9 +124,10 @@ impl ScopeApp {
             wasm_bindgen_futures::spawn_local(async move {
                 let picked = rfd::AsyncFileDialog::new()
                     .add_filter(
-                        "Waveform (.wav, .bin, .vcd, .csv)",
+                        "Waveform (.wav, .bin, .wfm, .vcd, .csv)",
                         &[
-                            "wav", "WAV", "bin", "BIN", "vcd", "VCD", "csv", "CSV", "txt", "TXT",
+                            "wav", "WAV", "bin", "BIN", "wfm", "WFM", "vcd", "VCD", "csv", "CSV",
+                            "txt", "TXT",
                         ],
                     )
                     .add_filter("All files", &["*"])

@@ -22,7 +22,7 @@ impl ScopeApp {
                 );
                 ui.add_space(6.0);
                 ui.label(
-                    "Opens FNIRSI DPOX180H and 1013D/1014D (.wav), Keysight/Agilent and Rigol (.bin) and \
+                    "Opens FNIRSI DPOX180H and 1013D/1014D (.wav), Keysight/Agilent (.bin), Rigol (.bin, .wfm) and \
                  VCD files, and CSV files from any oscilloscope. The files are read on this \
                  device: nothing is uploaded.",
                 );
@@ -320,7 +320,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         &[
             "Drop a file on the window, or use ⏏ File ▾ → Open file….",
             "File ▾ → Open example: real FNIRSI 1013D and Rigol captures to try the viewer without a scope.",
-            "Supported: FNIRSI DPOX180H, FNIRSI 1013D/1014D (original firmware), Keysight/Agilent and Rigol .bin, VCD (logic analyzers: digital signals in lanes at the bottom), and CSV/text tables from any oscilloscope (Keysight, Rigol, Tektronix, Siglent… and this viewer's own export). The format is found automatically; the maker and model are shown at the top left.",
+            "Supported: FNIRSI DPOX180H, FNIRSI 1013D/1014D (original firmware), Keysight/Agilent .bin, Rigol .bin and .wfm (DS1000Z, DS1000E/D, DS2000), VCD (logic analyzers: digital signals in lanes at the bottom), and CSV/text tables from any oscilloscope (Keysight, Rigol, Tektronix, Siglent… and this viewer's own export). The format is found automatically; the maker and model are shown at the top left.",
             "If the format is not certain, a window asks which one it is. If a file cannot be read, the red banner has an \"Open as…\" button to choose the format yourself.",
             "CSV: the first number column is the time (s), the others are channels; the names come from the header line. Files with up to millions of samples are drawn fast: only the part in view, at about two points per pixel.",
             "The file is read on this device; nothing is uploaded.",

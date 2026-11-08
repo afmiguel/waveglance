@@ -5,7 +5,7 @@
 
 use fnirsi_viewer::formats;
 use fnirsi_viewer::measure::{Measurement, measure};
-use fnirsi_viewer::model::Capture;
+use fnirsi_viewer::model::{Capture, Samples, Trace};
 use std::path::PathBuf;
 
 fn bytes(name: &str) -> Vec<u8> {
@@ -89,5 +89,182 @@ fn csv_files() {
             (f - f_expected).abs() < f_expected * 0.01,
             "{name}: f = {f}"
         );
+    }
+}
+
+#[test]
+fn wfm_files_open() {
+    // (file, model, channels, V/div of the first channel, time/div)
+    for (name, model, labels, vdiv, tdiv) in [
+        (
+            "DS1054Z-B.wfm",
+            "DS1054Z",
+            &["CH1", "CH2", "CH3", "CH4"][..],
+            2.0,
+            100e-6,
+        ),
+        (
+            "DS1054Z-ch1SquareCH4Uart.wfm",
+            "DS1104Z",
+            &["CH1", "CH4"][..],
+            1.0,
+            200e-6,
+        ),
+        (
+            "DS1074Z-A.wfm",
+            "DS1074Z",
+            &["CH1", "CH2", "CH3"][..],
+            0.05,
+            2e-3,
+        ),
+        ("MSO1104.wfm", "MSO1104Z", &["CH1"][..], 5.0, 1e-3),
+        ("DS1202Z-E.wfm", "DS1202Z-E", &["CH1"][..], 1.0, 1.0),
+        (
+            "DS1102E-D.wfm",
+            "DS1000E/D",
+            &["CH1", "CH2"][..],
+            2.0,
+            100e-6,
+        ),
+        (
+            "DS1102D-A.wfm",
+            "DS1000E/D",
+            &["CH1", "CH2"][..],
+            1.0,
+            500e-6,
+        ),
+        ("DS1052E.wfm", "DS1000E/D", &["CH1", "CH2"][..], 1.0, 100e-9),
+        ("DS2072A-1.wfm", "DS2000", &["CH1", "CH2"][..], 0.2, 500e-6),
+        ("DS2072A-7.wfm", "DS2000", &["CH2"][..], 0.2, 500e-6),
+        ("DS2202.wfm", "DS2000", &["CH1", "CH2"][..], 10.0, 5e-3),
+    ] {
+        let w = load(name);
+        assert_eq!(w.source.vendor, "Rigol", "{name}");
+        assert_eq!(w.source.model, model, "{name}");
+        let got: Vec<&str> = w.traces.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(got, labels, "{name}");
+        assert_eq!(w.traces[0].display.per_div, vdiv, "{name}");
+        let t = w.time_per_div.unwrap();
+        assert!((t - tdiv).abs() < tdiv * 1e-6, "{name}: {t}");
+    }
+    // Only logic analyzer data: no analog channel is on.
+    assert!(formats::open(&bytes("DS1074Z-C.wfm")).is_err());
+}
+
+/// Samples of `w` at the times of the CSV points of `c`: the mean
+/// difference in LSB and the share of points within 1 LSB.
+fn pointwise(w: &Trace, c: &Trace) -> (f64, f64) {
+    let Samples::Uniform { t0, dt, values } = &w.samples else {
+        panic!("uniform samples expected")
+    };
+    let (mut n, mut sum, mut close) = (0usize, 0.0, 0usize);
+    for p in c.points() {
+        let i = ((p[0] - t0) / dt).round();
+        let Some(&v) = (i >= 0.0).then(|| values.get(i as usize)).flatten() else {
+            continue;
+        };
+        let d = (f64::from(v) - p[1]).abs() / w.lsb();
+        n += 1;
+        sum += d;
+        close += usize::from(d <= 1.01);
+    }
+    assert!(
+        n * 10 >= c.samples.len() * 9,
+        "the CSV times are outside the record"
+    );
+    (sum / n as f64, close as f64 / n as f64)
+}
+
+#[test]
+fn wfm_samples_match_the_scope_csv() {
+    // DS1000E and DS2000: the CSV saved by the scope holds samples of the
+    // same record. (file, mean difference limit in LSB)
+    for (name, limit) in [
+        ("DS1102E-B", 2.0),
+        ("DS1102E-D", 1.0),
+        // DS1102D-A: gain and 0 V match the CSV within 2 codes, but the
+        // CSV times are about 2 samples away and the signal changes fast
+        // at 100 kSa/s, so the pointwise difference is larger.
+        ("DS1102D-A", 8.0),
+        ("DS2072A-1", 2.0),
+        ("DS2072A-3", 2.0),
+        ("DS2072A-5", 2.0),
+        ("DS2072A-6", 2.0),
+        ("DS2072A-7", 2.0),
+        ("DS2072A-9", 0.1),
+    ] {
+        let w = load(&format!("{name}.wfm"));
+        let c = load(&format!("{name}.csv"));
+        assert_eq!(w.traces.len(), c.traces.len(), "{name}");
+        for (wt, ct) in w.traces.iter().zip(&c.traces) {
+            let (mean, _) = pointwise(wt, ct);
+            assert!(mean < limit, "{name} {}: {mean:.2} LSB", wt.label);
+        }
+    }
+}
+
+/// The `count` samples in the middle of `v`.
+fn centre(v: &[f32], count: usize) -> &[f32] {
+    let start = v.len().saturating_sub(count) / 2;
+    &v[start..start + count.min(v.len())]
+}
+
+fn values(t: &Trace) -> Vec<f32> {
+    match &t.samples {
+        Samples::Uniform { values, .. } => values.clone(),
+        Samples::Timed(p) => p.iter().map(|p| p[1] as f32).collect(),
+    }
+}
+
+#[test]
+fn ds1000z_levels_match_the_scope_csv() {
+    // The DS1000Z CSV files do not hold the same samples as the .wfm, so
+    // (like RigolWFM) the sorted values are compared: same levels and
+    // distribution. (file, channel index in the .wfm and in the CSV)
+    for (name, i) in [
+        ("DS1054Z-A", 0),
+        ("DS1054Z-A", 1),
+        ("DS1054Z-A", 2),
+        ("DS1054Z-B", 0),
+        ("DS1054Z-B", 1),
+        ("DS1054Z-B", 2),
+        ("DS1054Z-B", 3),
+        ("DS1054Z-C", 0),
+        ("DS1054Z-C", 2),
+    ] {
+        let w = values(&load(&format!("{name}.wfm")).traces[i]);
+        let c = values(&load(&format!("{name}.csv")).traces[i]);
+        let n = w.len().min(c.len());
+        let mut a = centre(&w, n).to_vec();
+        let mut b = centre(&c, n).to_vec();
+        a.sort_by(f32::total_cmp);
+        b.sort_by(f32::total_cmp);
+        let d: Vec<f64> = a.iter().zip(&b).map(|(x, y)| f64::from(x - y)).collect();
+        let mean = d.iter().sum::<f64>() / n as f64;
+        let rms = (d.iter().map(|x| x * x).sum::<f64>() / n as f64).sqrt();
+        let max = d.iter().fold(0.0f64, |m, x| m.max(x.abs()));
+        assert!(
+            mean.abs() < 0.4 && rms < 0.5 && max < 0.6,
+            "{name} CH{}: mean {mean:.3} rms {rms:.3} max {max:.3}",
+            i + 1
+        );
+    }
+    // Older firmware with two channels: the DC level of the first 1000
+    // points.
+    for name in ["DS1054Z-ch1SquareCH2Uart", "DS1054Z-ch1SquareCH4Uart"] {
+        let w = load(&format!("{name}.wfm"));
+        let c = load(&format!("{name}.csv"));
+        for i in 0..2 {
+            let cv = values(&c.traces[i]);
+            let wv = values(&w.traces[i]);
+            let a = centre(&wv, cv.len());
+            let err: f64 = a[..1000]
+                .iter()
+                .zip(&cv[..1000])
+                .map(|(x, y)| f64::from(x - y))
+                .sum::<f64>()
+                / 1000.0;
+            assert!(err.abs() < 0.06, "{name} CH{}: {err:.3}", i + 1);
+        }
     }
 }

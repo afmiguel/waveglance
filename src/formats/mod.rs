@@ -9,6 +9,7 @@ pub mod csv;
 pub mod fnirsi_1013d;
 pub mod fnirsi_dpox;
 pub mod keysight_bin;
+pub mod rigol_wfm;
 pub mod vcd;
 
 use crate::model::{Capture, Display, Samples, Trace, TraceId};
@@ -57,6 +58,7 @@ pub static FORMATS: &[&dyn Format] = &[
     &fnirsi_dpox::DpoxFormat,
     &fnirsi_1013d::Fnirsi1013dFormat,
     &keysight_bin::KeysightBinFormat,
+    &rigol_wfm::RigolWfmFormat,
     &vcd::VcdFormat,
     &csv::CsvFormat,
 ];

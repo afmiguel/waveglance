@@ -297,7 +297,7 @@ impl ScopeApp {
             let text = if hovering {
                 "Release to load the file"
             } else {
-                "Drop a waveform file here (FNIRSI .wav, Keysight or Rigol .bin, VCD, or CSV), or use File ▾ → Open file…"
+                "Drop a waveform file here (FNIRSI .wav, Keysight .bin, Rigol .bin/.wfm, VCD, or CSV), or use File ▾ → Open file…"
             };
             ui.centered_and_justified(|ui| {
                 ui.label(RichText::new(text).size(18.0).color(palette::hint()))

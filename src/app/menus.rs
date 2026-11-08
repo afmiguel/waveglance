@@ -201,7 +201,7 @@ impl ScopeApp {
                 None => "FNIRSI Viewer".to_owned(),
             };
             ui.label(RichText::new(title).strong().color(palette::fg_dim()))
-                .on_hover_text("Reads FNIRSI DPOX180H and 1013D/1014D .wav, Keysight/Agilent and Rigol .bin, VCD, and CSV files of any oscilloscope");
+                .on_hover_text("Reads FNIRSI DPOX180H and 1013D/1014D .wav, Keysight/Agilent .bin, Rigol .bin and .wfm, VCD, and CSV files of any oscilloscope");
             // Version, discreet: identifies the build (also between releases).
             ui.label(
                 RichText::new(format!("v{VERSION}"))
