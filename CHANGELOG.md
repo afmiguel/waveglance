@@ -5,6 +5,12 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.16.1 — 2026-11-08
+
+- Fix: a file with logic signals only, opened with Y: Div saved from an
+  earlier file, showed its lanes squeezed at the bottom of the 8 divisions
+  (and the Y menu is off for such a file). The lanes now fill the plot.
+
 ## 0.16.0 — 2026-11-08
 
 Buses in VCD files.

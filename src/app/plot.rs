@@ -469,11 +469,15 @@ impl ScopeApp {
         let bus_hover = self.bus_hover(ui.ctx(), &maps);
         let logic_only = lane_top == Some(f64::INFINITY);
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
+        // Like a scope screen: 8 divisions. Not with logic signals only: the
+        // lanes fill the plot (they would sit at the bottom of the 8 divisions).
+        if divisions && !logic_only {
+            plot = plot.default_y_bounds(-SCREEN_DIVS_Y / 2.0, SCREEN_DIVS_Y / 2.0);
+        }
         plot = if divisions {
-            // Like a scope screen: 8 divisions, a line per division, and
-            // thinner lines at 1/5 division when zoomed in.
-            plot.default_y_bounds(-SCREEN_DIVS_Y / 2.0, SCREEN_DIVS_Y / 2.0)
-                .y_axis_label(if logic_only { "Logic" } else { "Divisions" })
+            // A line per division, and thinner lines at 1/5 division when
+            // zoomed in.
+            plot.y_axis_label(if logic_only { "Logic" } else { "Divisions" })
                 .y_grid_spacer(egui_plot::uniform_grid_spacer(|input| {
                     let s = input.base_step_size;
                     if s <= 0.2 {
