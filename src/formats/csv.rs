@@ -437,7 +437,10 @@ mod tests {
     #[test]
     fn roundtrip_of_the_viewer_export() {
         // A real 1013D capture: export it, read it back.
-        let e = &crate::examples::EXAMPLES[0];
+        let e = crate::examples::EXAMPLES
+            .iter()
+            .find(|e| e.file == "example-1013d-1khz-square.wav")
+            .unwrap();
         let original = crate::formats::open(e.bytes).unwrap();
         let text = crate::export::csv(&original, e.file, "test");
         let back = read_str(&text);

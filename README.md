@@ -36,7 +36,7 @@ mode, time cursors T1 and T2, automatic measurements and the Math channel.*
 - **Reference waveform**: a second file drawn faint behind the traces.
 - **Export** to CSV, **screenshot** (PNG) and **print**, with a white screen
   for paper.
-- **Built-in examples**: real 1013D and Rigol captures, and VCD files with
+- **Built-in examples**: real DPOX180H, 1013D and Rigol captures, and VCD files with
   buses and UART lines.
 - The settings (Y mode, measurements, FFT, cursors, decoder…) are kept for the
   next session.
@@ -206,7 +206,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 ## Use
 
 - Drop a file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
-- **File ▾ → Open example**: real FNIRSI 1013D and Rigol captures, and VCD
+- **File ▾ → Open example**: real FNIRSI DPOX180H and 1013D captures, Rigol captures, and VCD
   files made for the viewer (a CPU bus, a DAC, and three UART examples).
 - The welcome screen lists all the controls; **? Help** (F1) has the main
   instructions.
@@ -383,4 +383,7 @@ output, and three UART examples). Run the script again to make the same files.
 The images in `docs/images/` are screenshots of this viewer with the example
 files above.
 
-There are no DPOX180H examples: the only public DPOX180H files have no license.
+The files in `assets/examples/dpox180h/` are DPOX180H captures saved for this
+project by its author (a 1 kHz square wave on CH1, and on CH1 and CH2 with CH2
+in AC coupling). They are part of this project, under the same terms as its
+source code.

@@ -7,8 +7,8 @@
 //! - VCD files made by `scripts/make-vcd-examples.py` for this project:
 //!   see `assets/examples/vcd/README.md`.
 //!
-//! There are no DPOX180H examples yet: the only public DPOX180H files have
-//! no license.
+//! - DPOX180H captures saved for this project by its author: see
+//!   `assets/examples/dpox180h/README.md`.
 
 /// One built-in example file.
 pub struct Example {
@@ -31,6 +31,10 @@ pub struct Group {
 
 pub const GROUPS: &[Group] = &[
     Group {
+        name: "FNIRSI DPOX180H",
+        credit: "Captures saved on a DPOX180H by the author of this viewer",
+    },
+    Group {
         name: "FNIRSI 1013D",
         credit: "Captures by lexus2026HA (github.com/lexus2026HA/FNIRSI-2C53T-Decoder), \
                  license CC BY-NC 4.0",
@@ -47,6 +51,23 @@ pub const GROUPS: &[Group] = &[
 ];
 
 pub const EXAMPLES: &[Example] = &[
+    Example {
+        group: "FNIRSI DPOX180H",
+        label: "1 kHz square wave, CH1",
+        about: "DPOX180H, 500 µs/div, CH1 1 V/div DC: a 1 kHz square wave of about 1.6 Vpp. \
+                48000 samples at 4 MS/s; trigger Auto, rising edge on CH1.",
+        file: "example-dpox180h-1khz-square.wav",
+        bytes: include_bytes!("../assets/examples/dpox180h/square-1khz.wav"),
+    },
+    Example {
+        group: "FNIRSI DPOX180H",
+        label: "Two channels, CH2 in AC",
+        about: "DPOX180H, 500 µs/div. CH1 1 V/div DC and CH2 2 V/div AC coupling, \
+                the same 1 kHz square wave (small on CH2). Try Y: Div and the channel \
+                readouts at the bottom.",
+        file: "example-dpox180h-two-channels.wav",
+        bytes: include_bytes!("../assets/examples/dpox180h/two-channels.wav"),
+    },
     Example {
         group: "FNIRSI 1013D",
         label: "1 kHz square wave, CH1 and CH2",
@@ -263,6 +284,23 @@ mod tests {
         assert_eq!(decode_text("uart-at", "tx"), "AT\r\n");
         assert_eq!(decode_text("uart-at", "rx"), "\r\nOK\r\n");
         assert_eq!(decode_text("uart-analog", "tx_pin"), "Hello, FNIRSI!\r\n");
+    }
+
+    #[test]
+    fn dpox180h_examples() {
+        use crate::model::Coupling;
+        let open = |part: &str| {
+            let e = EXAMPLES.iter().find(|e| e.file.contains(part)).unwrap();
+            crate::formats::open(e.bytes).unwrap()
+        };
+        let w = open("dpox180h-1khz");
+        assert_eq!(w.source.model, "DPOX180H");
+        assert_eq!(w.traces.len(), 1);
+        assert_eq!(w.record_length, 48_000);
+        let w = open("dpox180h-two");
+        assert_eq!(w.traces.len(), 2);
+        assert_eq!(w.trace("CH2").unwrap().display.coupling, Some(Coupling::Ac));
+        assert_eq!(w.trace("CH1").unwrap().display.coupling, Some(Coupling::Dc));
     }
 
     #[test]

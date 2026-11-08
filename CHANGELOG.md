@@ -5,6 +5,12 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.25.0 — 2026-11-08
+
+- **DPOX180H examples** (File ▾ → Open example → FNIRSI DPOX180H): a 1 kHz
+  square wave on CH1, and the same signal on CH1 (DC) and CH2 (AC coupling).
+  Real captures saved on a DPOX180H for this project.
+
 ## 0.24.0 — 2026-11-08
 
 - **Several lines decoded at the same time.** In Decode ▾ each line has a

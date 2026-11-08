@@ -258,7 +258,10 @@ mod tests {
 
     #[test]
     fn csv_of_an_example() {
-        let e = &crate::examples::EXAMPLES[0];
+        let e = crate::examples::EXAMPLES
+            .iter()
+            .find(|e| e.file == "example-1013d-1khz-square.wav")
+            .unwrap();
         let w = crate::formats::open(e.bytes).unwrap();
         let text = csv(&w, e.file, "0.0.0");
         let lines: Vec<&str> = text.lines().collect();
