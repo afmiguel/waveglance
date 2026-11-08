@@ -5,7 +5,7 @@
 //! that each file contains).
 
 use fnirsi_viewer::formats;
-use fnirsi_viewer::model::{Acquisition, Capture, Trace};
+use fnirsi_viewer::model::{Acquisition, Capture, Coupling, Trace};
 use std::path::PathBuf;
 
 fn data_dir() -> PathBuf {
@@ -65,7 +65,10 @@ fn square_100khz_real_time() {
     let w = load("100kHZ-1V.wav");
     assert!(w.warnings.is_empty(), "{:?}", w.warnings);
     assert_eq!(w.source.model, "DPOX180H");
-    assert!(w.trigger.is_none());
+    let trig = w.trigger.as_ref().expect("trigger");
+    assert_eq!((trig.mode.as_str(), trig.rising), ("Auto", true));
+    assert_eq!(trig.source.as_deref(), Some("CH1"));
+    assert_eq!(w.trace("CH1").unwrap().display.coupling, Some(Coupling::Dc));
     assert_eq!(w.record_length, 48_000);
     assert_eq!(
         w.acquisition,
@@ -220,4 +223,43 @@ fn fft_of_the_100khz_square() {
         (v - expected).abs() < 0.03,
         "{v} V RMS, expected {expected}"
     );
+}
+
+/// A sequence saved on a real DPOX180H, one setting changed in each file
+/// (1 kHz square on CH1 and CH2, 500 µs/div). These files are not in the
+/// repository and `fetch-samples.sh` does not get them; without them the
+/// test does nothing.
+#[test]
+fn settings_sequence() {
+    let dir = data_dir().join("sequence");
+    if !dir.join("1.wav").exists() {
+        eprintln!("skipped: {} is missing", dir.display());
+        return;
+    }
+    // file: (CH1 coupling, CH2 coupling, mode, rising, source)
+    let dc = Some(Coupling::Dc);
+    let ac = Some(Coupling::Ac);
+    let truth = [
+        (1, dc, None, "Auto", true, "CH1"),
+        (2, dc, dc, "Auto", true, "CH1"),
+        (3, None, dc, "Auto", true, "CH2"),
+        (4, ac, None, "Auto", true, "CH1"),
+        (5, dc, ac, "Auto", true, "CH1"),
+        (6, dc, None, "Auto", false, "CH1"),
+        (7, dc, ac, "Auto", false, "CH2"),
+        (8, dc, None, "Normal", false, "CH1"),
+        (9, dc, None, "Auto", false, "CH1"),
+    ];
+    for (n, ch1, ch2, mode, rising, source) in truth {
+        let bytes = std::fs::read(dir.join(format!("{n}.wav"))).unwrap();
+        let w = formats::open(&bytes).unwrap_or_else(|e| panic!("{n}.wav: {e}"));
+        assert!(w.warnings.is_empty(), "{n}.wav: {:?}", w.warnings);
+        let coupling = |label| w.trace(label).map(|t| t.display.coupling);
+        assert_eq!(coupling("CH1"), ch1.map(Some), "{n}.wav CH1");
+        assert_eq!(coupling("CH2"), ch2.map(Some), "{n}.wav CH2");
+        let trig = w.trigger.as_ref().expect("trigger");
+        assert_eq!(trig.mode, mode, "{n}.wav mode");
+        assert_eq!(trig.rising, rising, "{n}.wav edge");
+        assert_eq!(trig.source.as_deref(), Some(source), "{n}.wav source");
+    }
 }

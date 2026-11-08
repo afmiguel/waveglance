@@ -16,13 +16,18 @@
 //! | Offset | Type | Field                                      |
 //! |--------|------|--------------------------------------------|
 //! | 0x66   | u8   | CH1 enabled (0 = off)                      |
+//! | 0x67   | u8   | CH1 coupling (0 = DC, 1 = AC)              |
 //! | 0x6E   | u64  | CH1 volts/div in microvolts                |
 //! | 0x7E   | u16  | CH1 ground marker, screen pixels (100 = centre) |
 //! | 0x82   | u64  | CH1 probe factor x 10000 (10000 = 1X, 100000 = 10X) |
 //! | 0xA6   | u8   | CH2 enabled                                |
+//! | 0xA7   | u8   | CH2 coupling (0 = DC, 1 = AC)              |
 //! | 0xAE   | u64  | CH2 volts/div in microvolts                |
 //! | 0xBE   | u16  | CH2 ground marker                          |
 //! | 0xC2   | u64  | CH2 probe factor x 10000                   |
+//! | 0xFA   | u8   | trigger mode (0 = Auto, 1 = Single, 2 = Normal) |
+//! | 0xFB   | u8   | trigger edge (0 = rising, 1 = falling)     |
+//! | 0xFC   | u8   | trigger source (0 = CH1, 1 = CH2)          |
 //! | 0x12D  | u32  | samples per channel                        |
 //! | 0x13D  | u32  | sample rate in Hz (overflows above 4.29 GS/s) |
 //! | 0x1D9  | u32  | time/div in picoseconds                    |
@@ -31,13 +36,17 @@
 //! (section table, enable flags, sample count, time/div), plus checks made
 //! against the screen thumbnails stored in real files (V/div in microvolts,
 //! probe factor, ground marker, ETS frame layout, trigger position).
+//! The coupling and trigger bytes come from a sequence of files saved on a
+//! real DPOX180H with one setting changed in each file. Single (1) was not
+//! in that sequence; it is the value between Auto and Normal, as in the
+//! FNIRSI 1013D. The trigger level was not found.
 //!
 //! The V/div value is the value that the scope shows, so it already includes
 //! the probe factor: voltages are at the probe tip. A 1X capture at 200 mV/div
 //! and a 10X capture at 2 V/div of the same signal have the same ADC codes.
 
 use super::{AdcScale, Confidence, Format, ReadError, adc_trace};
-use crate::model::{Acquisition, Capture, Source, Trace};
+use crate::model::{Acquisition, Capture, Coupling, Source, Trace, Trigger};
 use binrw::{BinRead, BinReaderExt};
 use std::io::Cursor;
 
@@ -101,6 +110,7 @@ pub struct RawHeader {
 
     #[br(seek_before = std::io::SeekFrom::Start(0x66))]
     pub ch1_enabled: u8,
+    pub ch1_coupling: u8,
     #[br(seek_before = std::io::SeekFrom::Start(0x6E))]
     pub ch1_uv_per_div: u64,
     #[br(seek_before = std::io::SeekFrom::Start(0x7E))]
@@ -110,12 +120,18 @@ pub struct RawHeader {
 
     #[br(seek_before = std::io::SeekFrom::Start(0xA6))]
     pub ch2_enabled: u8,
+    pub ch2_coupling: u8,
     #[br(seek_before = std::io::SeekFrom::Start(0xAE))]
     pub ch2_uv_per_div: u64,
     #[br(seek_before = std::io::SeekFrom::Start(0xBE))]
     pub ch2_marker_px: u16,
     #[br(seek_before = std::io::SeekFrom::Start(0xC2))]
     pub ch2_probe_x10000: u64,
+
+    #[br(seek_before = std::io::SeekFrom::Start(0xFA))]
+    pub trigger_mode: u8,
+    pub trigger_edge: u8,
+    pub trigger_source: u8,
 
     #[br(seek_before = std::io::SeekFrom::Start(0x12D))]
     pub sample_count: u32,
@@ -219,40 +235,53 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ParseError> {
     };
 
     let mut slot = 0;
-    let mut make = |on: bool, uv: u64, marker: u16, probe: u64, number: u8| -> Option<Trace> {
-        if !on {
-            return None;
-        }
-        let name = format!("CH{number}");
-        let raw = samples(slot);
-        slot += 1;
-        if uv == 0 {
-            warnings.push(format!("{name} V/div is zero; 1 V/div is used"));
-        }
-        let volts_per_div = if uv == 0 { 1.0 } else { uv as f64 * 1e-6 };
-        if probe == 0 {
-            warnings.push(format!("{name} probe factor is zero; 1X is used"));
-        }
-        let probe_factor = if probe == 0 {
-            1.0
-        } else {
-            probe as f64 / 10_000.0
+    let trigger = trigger(&header, &mut warnings);
+    let mut make =
+        |on: bool, uv: u64, marker: u16, probe: u64, coupling: u8, number: u8| -> Option<Trace> {
+            if !on {
+                return None;
+            }
+            let name = format!("CH{number}");
+            let coupling = match coupling {
+                0 => Some(Coupling::Dc),
+                1 => Some(Coupling::Ac),
+                v => {
+                    warnings.push(format!("{name} coupling value {v} is not known"));
+                    None
+                }
+            };
+            let raw = samples(slot);
+            slot += 1;
+            if uv == 0 {
+                warnings.push(format!("{name} V/div is zero; 1 V/div is used"));
+            }
+            let volts_per_div = if uv == 0 { 1.0 } else { uv as f64 * 1e-6 };
+            if probe == 0 {
+                warnings.push(format!("{name} probe factor is zero; 1X is used"));
+            }
+            let probe_factor = if probe == 0 {
+                1.0
+            } else {
+                probe as f64 / 10_000.0
+            };
+            let mut trace = build_trace(
+                number,
+                &raw,
+                volts_per_div,
+                marker,
+                probe_factor,
+                acquisition,
+                time_per_div_s,
+            );
+            trace.display.coupling = coupling;
+            Some(trace)
         };
-        Some(build_trace(
-            number,
-            &raw,
-            volts_per_div,
-            marker,
-            probe_factor,
-            acquisition,
-            time_per_div_s,
-        ))
-    };
     let ch1 = make(
         ch1_on,
         header.ch1_uv_per_div,
         header.ch1_marker_px,
         header.ch1_probe_x10000,
+        header.ch1_coupling,
         1,
     );
     let ch2 = make(
@@ -260,6 +289,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ParseError> {
         header.ch2_uv_per_div,
         header.ch2_marker_px,
         header.ch2_probe_x10000,
+        header.ch2_coupling,
         2,
     );
 
@@ -272,10 +302,44 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ParseError> {
         traces: [ch1, ch2].into_iter().flatten().collect(),
         time_per_div: Some(time_per_div_s),
         screen: None,
-        trigger: None,
+        trigger,
         acquisition,
         record_length: n,
         warnings,
+    })
+}
+
+/// Trigger mode, edge and source. An unknown value gives a warning.
+fn trigger(h: &RawHeader, warnings: &mut Vec<String>) -> Option<Trigger> {
+    let mode = match h.trigger_mode {
+        0 => "Auto",
+        1 => "Single",
+        2 => "Normal",
+        v => {
+            warnings.push(format!("trigger mode value {v} is not known"));
+            return None;
+        }
+    };
+    let rising = match h.trigger_edge {
+        0 => true,
+        1 => false,
+        v => {
+            warnings.push(format!("trigger edge value {v} is not known"));
+            return None;
+        }
+    };
+    let source = match h.trigger_source {
+        0 => Some("CH1".to_owned()),
+        1 => Some("CH2".to_owned()),
+        v => {
+            warnings.push(format!("trigger source value {v} is not known"));
+            None
+        }
+    };
+    Some(Trigger {
+        mode: mode.to_owned(),
+        rising,
+        source,
     })
 }
 
@@ -364,6 +428,9 @@ mod tests {
         pub ch2: Option<(u64, u16, Vec<u16>)>,
         pub rate: u32,
         pub tdiv_ps: u32,
+        pub ch2_ac: bool,
+        /// Trigger mode, edge and source bytes.
+        pub trigger: [u8; 3],
     }
 
     impl Fake {
@@ -406,6 +473,8 @@ mod tests {
                 put(&mut f, 0xBE, &m.to_be_bytes());
                 put(&mut f, 0xC2, &100_000u64.to_be_bytes());
             }
+            f[0xA7] = self.ch2_ac.into();
+            f[0xFA..0xFD].copy_from_slice(&self.trigger);
             put(&mut f, 0x12D, &count.to_be_bytes());
             put(&mut f, 0x13D, &self.rate.to_be_bytes());
             put(&mut f, 0x1D9, &self.tdiv_ps.to_be_bytes());
@@ -421,6 +490,8 @@ mod tests {
             ch2: Some((1_000_000, 50, vec![3200; 2400])),
             rate: 100_000_000,
             tdiv_ps: 1_000_000,
+            ch2_ac: false,
+            trigger: [0; 3],
         }
     }
 
@@ -485,6 +556,8 @@ mod tests {
             ch2: None,
             rate: 705_032_704,
             tdiv_ps: 5_000,
+            ch2_ac: false,
+            trigger: [0; 3],
         };
         let w = read(&f.bytes()).unwrap();
         assert_eq!(w.acquisition, Acquisition::Equivalent { frames: 10 });
@@ -494,6 +567,29 @@ mod tests {
         assert!((ch1.points()[0][0] + 30e-9).abs() < 1e-18);
         assert!((ch1.points()[150][0]).abs() < 1e-18);
         assert!(ch1.clipped());
+    }
+
+    #[test]
+    fn coupling_and_trigger() {
+        let w = read(&real_time_fake().bytes()).unwrap();
+        assert_eq!(trace(&w, "CH1").display.coupling, Some(Coupling::Dc));
+        let t = w.trigger.unwrap();
+        assert_eq!((t.mode.as_str(), t.rising), ("Auto", true));
+        assert_eq!(t.source.as_deref(), Some("CH1"));
+
+        let mut f = real_time_fake();
+        f.ch2_ac = true;
+        f.trigger = [2, 1, 1];
+        let w = read(&f.bytes()).unwrap();
+        assert_eq!(trace(&w, "CH2").display.coupling, Some(Coupling::Ac));
+        let t = w.trigger.unwrap();
+        assert_eq!((t.mode.as_str(), t.rising), ("Normal", false));
+        assert_eq!(t.source.as_deref(), Some("CH2"));
+
+        f.trigger = [7, 0, 0];
+        let w = read(&f.bytes()).unwrap();
+        assert!(w.trigger.is_none());
+        assert_eq!(w.warnings.len(), 1);
     }
 
     #[test]

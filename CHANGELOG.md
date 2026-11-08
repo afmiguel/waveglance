@@ -5,6 +5,16 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.19.0 — 2026-11-08
+
+- **DPOX180H: coupling and trigger.** The viewer now reads the AC/DC
+  coupling of each channel and the trigger mode (Auto, Single, Normal),
+  edge and source (CH1, CH2). They show in the channel buttons and the
+  trigger readout, as for the 1013D. The offsets were found with a sequence
+  of files saved on a real DPOX180H, with one setting changed in each file.
+  That sequence also confirms that with both channels on, the CH2 samples
+  come after the CH1 samples. The trigger level is not read yet.
+
 ## 0.18.0 — 2026-11-08
 
 - **FFT as bars**: FFT ▾ → Draw → **Bars** shows one bar per frequency bin,

@@ -8,7 +8,7 @@ not certain, a window asks):
 
 | Model | File | Notes |
 |-------|------|-------|
-| DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes |
+| DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes; coupling and trigger settings |
 | 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
 | Keysight / Agilent | `.bin` (AG01, AG03, AG10) | Up to 4 channels; volts or amperes; no V/div in the file (a V/div that fits is used) |
 | VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, buses (up to 64 bits) as value lanes in hex, dec or bin, `real` variables as analog traces |
@@ -160,9 +160,13 @@ All values are big-endian. Offsets are from the start of the file.
 |--------|------|-------|
 | 0x00 | 7 × u32 | Section table: settings start/size, screen start/size, waveform start/size, total size |
 | 0x66 / 0xA6 | u8 | CH1 / CH2 enabled |
+| 0x67 / 0xA7 | u8 | CH1 / CH2 coupling: 0 = DC, 1 = AC |
 | 0x6E / 0xAE | u64 | CH1 / CH2 V/div in µV (as shown, includes the probe factor) |
 | 0x7E / 0xBE | u16 | CH1 / CH2 ground marker, screen pixels (100 = centre, 25 px/div) |
 | 0x82 / 0xC2 | u64 | CH1 / CH2 probe factor × 10000 (10000 = 1X, 100000 = 10X) |
+| 0xFA | u8 | Trigger mode: 0 = Auto, 1 = Single, 2 = Normal |
+| 0xFB | u8 | Trigger edge: 0 = rising, 1 = falling |
+| 0xFC | u8 | Trigger source: 0 = CH1, 1 = CH2 |
 | 0x12D | u32 | Samples per channel |
 | 0x13D | u32 | Sample rate in Hz (overflows above 4.29 GS/s) |
 | 0x1D9 | u32 | Time/div in ps |
@@ -181,12 +185,15 @@ Conversion:
 The section table, enable flags, sample count and time/div come from the
 firmware analysis in Rav263/fnirsi-wave-decoder. The V/div in µV, the probe
 factor, the ground marker, the ETS frame layout and the trigger position were
-found by comparing real files with the screen of the scope.
+found by comparing real files with the screen of the scope. The coupling and
+trigger bytes, and the CH1-then-CH2 data layout, were found with a sequence
+of files saved on a real DPOX180H, with one setting changed in each file.
 
 ### Not verified yet
 
-- A file with both channels on (the layout CH1-then-CH2 comes from the firmware
-  analysis; it is tested only with synthetic files).
+- Trigger mode Single (value 1): it was not in the sequence. It is the value
+  between Auto and Normal, as in the 1013D.
+- The trigger level: it was not found in the file.
 - The sample rate in real-time mode is verified only at 400 MS/s.
 - A ground marker far from the centre, and slow (roll) timebases.
 
