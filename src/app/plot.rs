@@ -497,7 +497,18 @@ impl ScopeApp {
         // Digital lanes: the y axis has no value scale there.
         let lane_top = self.lane_zone_top();
         let in_lanes = move |y: f64| lane_top.is_some_and(|z| y < z);
-        let bus_hover = self.bus_hover(ui.ctx(), &maps);
+        let bus_hover = self
+            .bus_hover(ui.ctx(), &maps)
+            .or_else(|| self.decode_hover(ui.ctx()));
+        // The decoder lane: its corners keep it in the automatic bounds.
+        let decode_corners: Vec<[f64; 2]> = match (self.decode_map(), record_span.as_ref()) {
+            (Some(m), Some(span)) => {
+                let (lo, hi) = (m.to_plot(0.0), m.to_plot(1.0));
+                let (a, b) = (*span.start(), *span.end());
+                vec![[a, lo], [a, hi], [b, hi], [b, lo]]
+            }
+            _ => Vec::new(),
+        };
         let logic_only = lane_top == Some(f64::INFINITY);
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
         // Like a scope screen: 8 divisions. Not with logic signals only: the
@@ -686,7 +697,8 @@ impl ScopeApp {
                     }
                 }
                 if let Some(fit) = fit {
-                    let channels: Vec<&[[f64; 2]]> = data.iter().map(Vec::as_slice).collect();
+                    let mut channels: Vec<&[[f64; 2]]> = data.iter().map(Vec::as_slice).collect();
+                    channels.push(&decode_corners);
                     let mut time = plot.plot_bounds().range_x();
                     if matches!(fit, Fit::Horizontal | Fit::Both)
                         && let Some(full) = record_span.clone()
@@ -726,6 +738,15 @@ impl ScopeApp {
                         Line::new("MATH", math_data)
                             .color(palette::math())
                             .width(1.5),
+                    );
+                }
+                if !decode_corners.is_empty() {
+                    plot.line(
+                        Line::new("", decode_corners.clone())
+                            .color(Color32::from_rgba_premultiplied(0, 0, 0, 1))
+                            .width(0.0)
+                            .allow_band(false)
+                            .allow_hover(false),
                     );
                 }
                 for (i, (points, label)) in data.into_iter().zip(labels).enumerate() {
@@ -775,6 +796,24 @@ impl ScopeApp {
             self.bus_radix,
         );
         draw_lane_labels(ui, &response.transform, self.traces(), &maps);
+        if let (Some(d), Some(map), Some(source)) =
+            (self.decoded(), self.decode_map(), self.decode_source())
+        {
+            let label = format!(
+                "{} {}",
+                self.decode.protocol.label(),
+                self.traces()[source].label
+            );
+            draw_decode_lane(
+                ui,
+                &response.transform,
+                &d,
+                map,
+                self.decode_radix,
+                palette::channel(source),
+                &label,
+            );
+        }
         if on_plot {
             let pos = ui.ctx().input(|i| i.pointer.latest_pos());
             let over = pos.and_then(|p| marker_at(&response.transform, &marker_maps, p));

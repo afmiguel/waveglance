@@ -35,7 +35,7 @@ impl ScopeApp {
                 if let Some(bits) = buses[i] {
                     let text = format!("{bits}-bit bus · {}", self.bus_radix.label());
                     let r = channel_button(ui, name, &text, color, self.visible[i]).on_hover_text(
-                        "Bus of digital signals. Click to hide or show it; right click (or long press): values in Hex, Dec or Bin.",
+                        "Bus of digital signals. Click to hide or show it; right click (or long press): values in Hex, Dec, Bin or ASCII.",
                     );
                     if r.clicked() {
                         self.visible[i] = !self.visible[i];

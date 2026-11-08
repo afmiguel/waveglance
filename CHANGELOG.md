@@ -5,6 +5,26 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.21.0 — 2026-11-08
+
+- **Protocol decoder (⇄ Decode ▾), first protocol: UART.** Decodes a
+  serial line into bytes: baud rate measured from the signal (rounded to a
+  standard rate) or chosen, 5–9 data bits, parity None/Even/Odd, 1 or 2 stop
+  bits, idle high or low (inverted). It works on a digital VCD line and on
+  an analog channel of an oscilloscope (automatic threshold with hysteresis,
+  or a value in volts). The words are drawn in a lane under the traces, and
+  listed in a row under the plot in Hex, Dec, Bin or **ASCII**; a click
+  on a word centres it; ⎘ Copy copies all of them. Words with a parity or
+  framing error are in the warning colour, and the row warns when there are
+  fewer than 4 samples per bit. Settings are kept for the next session.
+- The decoders are a module of their own (`src/decode/`, one file per
+  protocol), so that I2C and SPI can be added later.
+- ASCII is also a choice for VCD buses (right-click on the bus readout).
+- New examples (File ▾ → Open example → Logic (VCD)): **UART: AT command
+  and reply** (115200 baud, tx and rx) and **UART on an analog line** (9600
+  baud, slow edges and noise).
+- Fix: two example descriptions had long runs of spaces in their tooltips.
+
 ## 0.20.0 — 2026-11-08
 
 - **Fit button for the FFT**: ⛶ Fit, next to the FFT readouts, returns the

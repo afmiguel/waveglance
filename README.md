@@ -56,7 +56,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
   and voltage measurements are off. The FFT shows frequencies, with levels in
   dB relative to the peak.
 - Buses (VCD): a lane with the value of each part written in it. Right-click
-  (or long-press) the bus readout in the bottom bar to choose Hex, Dec or Bin.
+  (or long-press) the bus readout in the bottom bar to choose Hex, Dec, Bin or ASCII.
 - **⌖ Cursors** menu (Off / Time / Volt / Both, and *Bring to view*): drag a
   dashed cursor line to move it. The names T1, T2, V1, V2 are at the edges of
   the plot; a cursor outside the view shows an arrow there (◀T1, V2▲). The
@@ -66,6 +66,14 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - **Σ Math ▾**: CH1 + CH2, CH1 − CH2 or CH2 − CH1, measured like a channel.
 - **⌕ Search ▾**: find rising edges, falling edges or glitches in the whole
   record; [ and ] go to the previous and next one.
+- **⇄ Decode ▾**: protocol decoder (logic analyzer). **UART**: baud rate
+  (measured from the signal, or chosen), 5–9 data bits, parity, 1 or 2 stop
+  bits, idle high or low. It works on a digital (VCD) line or on an analog
+  channel (automatic or manual threshold). The words are drawn in a lane under
+  the traces and listed under the plot in Hex, Dec, Bin or ASCII; click a word
+  to show it; ⎘ Copy copies them all. Parity and framing errors are in the
+  warning colour. The decoders are in `src/decode/` (one file per protocol);
+  I2C and SPI can be added the same way.
 - **▤ Measure → Statistics per cycle**: mean, min, max, σ and n of the time
   measurements, in a floating window.
 - **∿ FFT ▾** menu: spectrum of CH1 or CH2 under the plot, of the samples
@@ -125,6 +133,7 @@ this on each push to `main`.
 | `src/formats/` | One module per file format, detection (`probe`) and `open` |
 | `src/app/` | User interface: `mod.rs` (state), `menus`, `readouts`, `plot`, `input`, `dialogs`, `actions`, `format` |
 | `src/measure.rs`, `src/fft.rs`, `src/cursors.rs` | Measurements, spectrum, cursors (work on any trace) |
+| `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`) |
 | `src/export.rs`, `src/examples.rs`, `src/palette.rs` | CSV/PNG/print, built-in examples, colours |
 
 To add a file format: write a module in `src/formats/` that implements

@@ -349,7 +349,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
             "⊕ Zoom: an overview of the whole record above the plot. The bright window is the part shown below. Click or drag in it to move there; wheel on it to zoom in time.",
             "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both. Scope screen: the time window the scope showed (a file opens on it when it stores it).",
             "Logic signals only (VCD): the axis is \"Logic\"; Y, Math, voltage cursors and voltage measurements are off; the FFT shows frequencies, with levels in dB relative to the peak.",
-            "Buses (VCD): the value of each part is written in its lane. Right-click the bus readout at the bottom: Hex, Dec or Bin. Hover a bus lane to read the value at the pointer.",
+            "Buses (VCD): the value of each part is written in its lane. Right-click the bus readout at the bottom: Hex, Dec, Bin or ASCII. Hover a bus lane to read the value at the pointer.",
         ],
     );
     section(
@@ -390,6 +390,16 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
             "Draw: Line, or Bars (one bar per frequency bin, like a spectrum analyzer). Zoomed out, the bins in one screen column make one bar, at the highest level.",
             "Peak: the highest line above DC (white dot); its frequency is interpolated between bins. Δf: the frequency step; a longer time span gives a finer step.",
             "The FFT plot opens up to 20 × the peak frequency; ⛶ Fit (next to the readouts) or a double-click returns there; zoom out to see up to half the sample rate.",
+        ],
+    );
+    section(
+        ui,
+        "Protocol decoder (⇄ Decode menu)",
+        &[
+            "UART: choose the data line (a channel or a VCD signal). Baud Auto measures the rate from the shortest pulse; or choose it. Data bits, parity, stop bits and the idle level as the device sends them.",
+            "An analog channel is made into 0 and 1 with a threshold: Auto (the middle of the signal, with hysteresis) or a value in volts.",
+            "The words are in a lane under the traces and in a row under the plot: Hex, Dec, Bin or ASCII. Click a word in the row to centre it; ⎘ Copy copies all of them. A word with a parity or framing error is in the warning colour.",
+            "Use a time base that gives at least 4 samples per bit (10 or more is better); the row warns when there are fewer.",
         ],
     );
     section(

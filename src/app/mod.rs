@@ -1,6 +1,7 @@
 //! Oscilloscope-style user interface.
 
 mod actions;
+mod decoder;
 mod dialogs;
 mod format;
 mod input;
@@ -9,6 +10,7 @@ mod plot;
 mod readouts;
 
 use crate::cursors::{self, CursorMode, Cursors};
+use crate::decode;
 use crate::fft;
 use crate::formats;
 use crate::measure::{self, Measurement, Unit};
@@ -46,6 +48,9 @@ const MATH_KEY: &str = "math";
 const CURSOR_MODE_KEY: &str = "cursor_mode";
 /// Storage key of the way bus values are written (hex, dec, bin).
 const BUS_RADIX_KEY: &str = "bus_radix";
+/// Storage keys of the protocol decoder settings and of how it writes the words.
+const DECODE_KEY: &str = "decode";
+const DECODE_RADIX_KEY: &str = "decode_radix";
 /// Storage key of the FFT settings.
 const FFT_KEY: &str = "fft";
 /// Part of the plot area used by the time plot when the FFT is shown.
@@ -364,6 +369,12 @@ pub struct ScopeApp {
     search: Search,
     /// How bus values are written (saved).
     bus_radix: Radix,
+    /// Protocol decoder (saved).
+    decode: decode::Settings,
+    /// How decoded words are written (saved).
+    decode_radix: Radix,
+    /// The decode result of the current file and settings.
+    decode_cache: RefCell<Option<(DecodeKey, Option<Rc<decode::Decoded>>)>>,
     /// Screenshots arrive here (egui calls back after the frame is drawn).
     shot_tx: Sender<std::sync::Arc<egui::ColorImage>>,
     shot_rx: Receiver<std::sync::Arc<egui::ColorImage>>,
@@ -481,6 +492,15 @@ impl ScopeApp {
                 .storage
                 .and_then(|s| eframe::get_value(s, BUS_RADIX_KEY))
                 .unwrap_or_default(),
+            decode: cc
+                .storage
+                .and_then(|s| eframe::get_value(s, DECODE_KEY))
+                .unwrap_or_default(),
+            decode_radix: cc
+                .storage
+                .and_then(|s| eframe::get_value(s, DECODE_RADIX_KEY))
+                .unwrap_or_default(),
+            decode_cache: RefCell::new(None),
             shot_tx,
             shot_rx,
             visible: Vec::new(),
@@ -631,14 +651,35 @@ impl ScopeApp {
 
     /// Vertical mapping of each trace for the current Y axis mode
     /// (`None` if the trace is hidden). One entry per trace.
-    pub fn y_maps(&self) -> Vec<Option<YMap>> {
-        // Digital traces: one lane each, under the analog traces (lane 0 at
-        // the bottom). Lane height: 1 division (Div), or 15% of the analog
-        // range (Volts).
-        let traces = self.traces();
-        let lanes = traces.iter().filter(|t| t.is_digital()).count();
+    /// All the lanes: one per digital trace, plus the decoder lane.
+    pub(super) fn total_lanes(&self) -> usize {
+        self.traces().iter().filter(|t| t.is_digital()).count() + self.decode_lanes()
+    }
+
+    /// The mapping of lane `k` of `lanes` (lane 0 at the bottom). Lane
+    /// height: 1 division (Div), or 15% of the analog range (Volts).
+    pub(super) fn lane_map(&self, k: usize, lanes: usize) -> YMap {
+        let k = k as f64;
         let (lo, hi) = self.analog_span.unwrap_or((0.0, 0.0));
         let volts_lane = if hi > lo { (hi - lo) * 0.15 } else { 1.0 };
+        match self.y_axis {
+            YAxis::Divisions => YMap {
+                scale: 0.7,
+                offset: -SCREEN_DIVS_Y / 2.0 + 0.15 + k,
+            },
+            YAxis::Volts => YMap {
+                scale: volts_lane * 0.7,
+                // The top lane just under the analog range.
+                offset: lo - (lanes as f64 - k + 0.2) * volts_lane,
+            },
+        }
+    }
+
+    pub fn y_maps(&self) -> Vec<Option<YMap>> {
+        // Digital traces: one lane each, under the analog traces; the
+        // decoder lane (if any) is the bottom one.
+        let traces = self.traces();
+        let lanes = self.total_lanes();
         let mut lane = 0usize;
         traces
             .iter()
@@ -646,22 +687,12 @@ impl ScopeApp {
             .map(|(i, t)| {
                 if t.is_digital() {
                     // Top lane first: the first digital trace is the highest.
-                    let k = (lanes - 1 - lane) as f64;
+                    let k = lanes - 1 - lane;
                     lane += 1;
                     if !self.visible.get(i).copied().unwrap_or(true) {
                         return None;
                     }
-                    return Some(match self.y_axis {
-                        YAxis::Divisions => YMap {
-                            scale: 0.7,
-                            offset: -SCREEN_DIVS_Y / 2.0 + 0.15 + k,
-                        },
-                        YAxis::Volts => YMap {
-                            scale: volts_lane * 0.7,
-                            // The first trace just under the analog range.
-                            offset: lo - (lanes as f64 - k + 0.2) * volts_lane,
-                        },
-                    });
+                    return Some(self.lane_map(k, lanes));
                 }
                 if !self.visible.get(i).copied().unwrap_or(true) {
                     return None;
@@ -687,11 +718,11 @@ impl ScopeApp {
     /// no value scale: `None` without lanes, infinity with lanes only.
     pub(super) fn lane_zone_top(&self) -> Option<f64> {
         let traces = self.traces();
-        let lanes = traces.iter().filter(|t| t.is_digital()).count();
-        if lanes == 0 {
+        let digital = traces.iter().filter(|t| t.is_digital()).count();
+        if self.total_lanes() == 0 {
             return None;
         }
-        if lanes == traces.len() {
+        if digital == traces.len() {
             return Some(f64::INFINITY);
         }
         match (self.y_axis, self.analog_span) {
@@ -964,6 +995,11 @@ impl eframe::App for ScopeApp {
         if self.waveform.is_some() && self.cursors.mode != CursorMode::Off {
             egui::Panel::bottom("cursor_readout").show(ui, |ui| self.cursor_readout(ui));
         }
+        if self.decode_source().is_some() {
+            egui::Panel::bottom("decode_readout")
+                .resizable(false)
+                .show(ui, |ui| self.decode_readout(ui));
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).fill(palette::panel_bg()))
             .show(ui, |ui| self.scope_screen(ui));
@@ -1000,12 +1036,14 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, MATH_KEY, &self.math);
         eframe::set_value(storage, CURSOR_MODE_KEY, &self.cursors.mode);
         eframe::set_value(storage, BUS_RADIX_KEY, &self.bus_radix);
+        eframe::set_value(storage, DECODE_KEY, &self.decode);
+        eframe::set_value(storage, DECODE_RADIX_KEY, &self.decode_radix);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
     }
 }
 
 // Helpers of the submodules, for the parent, the other submodules and the tests.
-use self::{format::*, plot::*, readouts::*};
+use self::{decoder::*, format::*, plot::*, readouts::*};
 
 #[cfg(test)]
 mod tests {

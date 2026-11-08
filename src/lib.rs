@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod cursors;
+pub mod decode;
 pub mod examples;
 pub mod export;
 pub mod fft;

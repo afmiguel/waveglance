@@ -8,6 +8,7 @@ be part of the app. Run it again to make the same files:
 """
 
 import math
+import random
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "assets" / "examples" / "vcd"
@@ -149,9 +150,66 @@ def dac_sine():
     return header("1 us", variables) + d.lines()
 
 
+def uart_levels(text, bits_per_s, t0_s):
+    """(time_s, level) changes of a UART line sending `text` (8N1, idle 1)
+    from time `t0_s`."""
+    bit = 1.0 / bits_per_s
+    t = t0_s
+    out = []
+    for ch in text.encode():
+        levels = [0] + [(ch >> k) & 1 for k in range(8)] + [1]
+        for level in levels:
+            out.append((t, level))
+            t += bit
+    return out, t
+
+
+def uart_at():
+    """A host sends "AT\\r\\n" on tx; the device answers "\\r\\nOK\\r\\n"
+    on rx 150 us later. 115200 baud, 8N1."""
+    d = Dump()
+    d.set(0, "!", 1)
+    d.set(0, '"', 1)
+    tx, end = uart_levels("AT\r\n", 115200, 20e-6)
+    rx, end = uart_levels("\r\nOK\r\n", 115200, end + 150e-6)
+    for ident, changes in (("!", tx), ('"', rx)):
+        for t, level in changes:
+            d.set(round(t * 1e9), ident, level)
+    d.events.setdefault(round((end + 30e-6) * 1e9), [])
+    variables = [("wire", 1, "!", "tx"), ("wire", 1, '"', "rx")]
+    return header("1 ns", variables) + d.lines()
+
+
+def uart_analog():
+    """A TTL serial line as an oscilloscope sees it: 3.3 V, 9600 baud,
+    8N1, "Hello, FNIRSI!\\r\\n". Edges with a 3 us time constant and
+    +-50 mV of noise; one sample every 4 us (26 per bit)."""
+    rng = random.Random(1)
+    changes, end = uart_levels("Hello, FNIRSI!\r\n", 9600, 300e-6)
+    end += 300e-6
+    tau, step = 3.0, 4  # us
+    d = Dump()
+    level, v, k = 1, 3.3, 0
+    for t in range(0, round(end * 1e6) + step, step):
+        while k < len(changes) and changes[k][0] * 1e6 <= t:
+            level = changes[k][1]
+            k += 1
+        target = 3.3 * level
+        v += (target - v) * (1 - math.exp(-step / tau))
+        d.real(t, "!", v + rng.uniform(-0.05, 0.05))
+    variables = [("real", 64, "!", "tx_pin")]
+    return header("1 us", variables) + d.lines()
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, lines in [("memory-bus.vcd", memory_bus()), ("dac-sine.vcd", dac_sine())]:
+    files = [
+        ("memory-bus.vcd", memory_bus()),
+        ("dac-sine.vcd", dac_sine()),
+        ("uart-at.vcd", uart_at()),
+        ("uart-analog.vcd", uart_analog()),
+    ]
+    for name, lines in files:
         (OUT / name).write_text("\n".join(lines) + "\n")
         print(OUT / name)
 

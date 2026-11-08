@@ -173,24 +173,35 @@ pub fn si_bare(value: f64) -> String {
     minus(format!("{text} {prefix}"))
 }
 
-/// How bus values are written.
+/// How bus and decoded values are written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Radix {
     #[default]
     Hex,
     Dec,
     Bin,
+    /// Characters: printable ASCII as it is, else an escape ("\n", "\x1B").
+    Ascii,
 }
 
 impl Radix {
-    pub const ALL: [Self; 3] = [Self::Hex, Self::Dec, Self::Bin];
+    pub const ALL: [Self; 4] = [Self::Hex, Self::Dec, Self::Bin, Self::Ascii];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Hex => "Hex",
             Self::Dec => "Dec",
             Self::Bin => "Bin",
+            Self::Ascii => "ASCII",
         }
+    }
+}
+
+/// A decoded word of `bits` bits: "4F", "79", "01001111" or "O".
+pub fn word_text(value: u32, bits: u8, radix: Radix) -> String {
+    match radix {
+        Radix::Ascii => crate::decode::ascii(value),
+        _ => bus_text(f64::from(value), u16::from(bits), radix),
     }
 }
 
@@ -207,5 +218,6 @@ pub fn bus_text(value: f64, bits: u16, radix: Radix) -> String {
         Radix::Hex => format!("{v:0width$X}", width = bits.div_ceil(4)),
         Radix::Dec => v.to_string(),
         Radix::Bin => format!("{v:0bits$b}"),
+        Radix::Ascii => u32::try_from(v).map_or_else(|_| format!("{v:X}"), crate::decode::ascii),
     }
 }

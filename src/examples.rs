@@ -133,16 +133,33 @@ pub const EXAMPLES: &[Example] = &[
     Example {
         group: "Logic (VCD)",
         label: "CPU bus: write and read cycles",
-        about: "A 10 MHz bus: address, data and strobes. The data bus is z (shown X) when                 no device drives it. Zoom in to read the values; right-click a bus readout                 at the bottom for Hex, Dec or Bin.",
+        about: "A 10 MHz bus: address, data and strobes. The data bus is z (shown X) when no device drives it. Zoom in to read the values; right-click a bus readout at the bottom for Hex, Dec, Bin or ASCII.",
         file: "example-vcd-memory-bus.vcd",
         bytes: include_bytes!("../assets/examples/vcd/memory-bus.vcd"),
     },
     Example {
         group: "Logic (VCD)",
         label: "8-bit DAC: code and analog output",
-        about: "A 500 Hz sine from an 8-bit DAC: the code bus, the load strobe and the                 filtered analog output in volts. Try the time cursors on the code and vout.",
+        about: "A 500 Hz sine from an 8-bit DAC: the code bus, the load strobe and the filtered analog output in volts. Try the time cursors on the code and vout.",
         file: "example-vcd-dac-sine.vcd",
         bytes: include_bytes!("../assets/examples/vcd/dac-sine.vcd"),
+    },
+    Example {
+        group: "Logic (VCD)",
+        label: "UART: AT command and reply",
+        about: "A host sends \"AT\" on tx and the device answers \"OK\" on rx, at 115200 baud \
+                8N1. Use Decode ▾ → UART, then choose tx or rx; Show ASCII to read the text.",
+        file: "example-vcd-uart-at.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/uart-at.vcd"),
+    },
+    Example {
+        group: "Logic (VCD)",
+        label: "UART on an analog line (9600 baud)",
+        about: "A 3.3 V serial line as an oscilloscope sees it: slow edges and noise. \
+                Decode ▾ → UART finds the baud rate and the threshold; Show ASCII reads \
+                \"Hello, FNIRSI!\".",
+        file: "example-vcd-uart-analog.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/uart-analog.vcd"),
     },
 ];
 
@@ -158,6 +175,29 @@ mod tests {
             assert!(w.warnings.is_empty(), "{}: {:?}", e.file, w.warnings);
             assert!(GROUPS.iter().any(|g| g.name == e.group), "{}", e.file);
         }
+    }
+
+    fn decode_text(file: &str, label: &str) -> String {
+        let e = EXAMPLES.iter().find(|e| e.file.contains(file)).unwrap();
+        let w = crate::formats::open(e.bytes).unwrap();
+        let settings = crate::decode::Settings {
+            protocol: crate::decode::Protocol::Uart,
+            ..Default::default()
+        };
+        let d = crate::decode::decode(w.trace(label).unwrap(), &settings).unwrap();
+        assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+        assert!(d.frames.iter().all(|f| f.error.is_none()));
+        d.frames
+            .iter()
+            .map(|f| char::from_u32(f.value).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn uart_examples_decode() {
+        assert_eq!(decode_text("uart-at", "tx"), "AT\r\n");
+        assert_eq!(decode_text("uart-at", "rx"), "\r\nOK\r\n");
+        assert_eq!(decode_text("uart-analog", "tx_pin"), "Hello, FNIRSI!\r\n");
     }
 
     #[test]

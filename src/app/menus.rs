@@ -357,6 +357,23 @@ impl ScopeApp {
                 |ui| self.search_menu(ui),
             );
             ui.add_space(8.0);
+            let decode_label = match self.decode_source() {
+                Some(i) => format!(
+                    "⇄ Decode: {} {} ▾",
+                    self.decode.protocol.label(),
+                    self.traces()[i].label
+                ),
+                None => "⇄ Decode ▾".to_owned(),
+            };
+            toolbar_menu(
+                ui,
+                loaded,
+                decode_label,
+                "Protocol decoder (logic analyzer): serial data as bytes",
+                stay_open(),
+                |ui| self.decode_menu(ui),
+            );
+            ui.add_space(8.0);
             let (theme_label, theme_tip) = if self.light_theme {
                 ("◐ Black", "Black screen, like the scope")
             } else {
@@ -603,7 +620,7 @@ const BUS_NOT_HERE: &str = "A bus has values, not a waveform: not for this";
 
 impl ScopeApp {
     /// For each trace: true if it is a bus.
-    fn bus_flags(&self) -> Vec<bool> {
+    pub(super) fn bus_flags(&self) -> Vec<bool> {
         self.traces().iter().map(Trace::is_bus).collect()
     }
 }
