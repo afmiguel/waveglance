@@ -316,6 +316,8 @@ pub struct ScopeApp {
     load_count: u64,
     /// Fit requested by a button, applied on the next plot frame.
     pending_fit: Option<Fit>,
+    /// The FFT Fit button was clicked: reset the FFT view this frame.
+    fft_fit: bool,
     /// Measurement cursors.
     cursors: Cursors,
     /// Selected automatic measurements.
@@ -436,6 +438,7 @@ impl ScopeApp {
             error: None,
             load_count: 0,
             pending_fit: None,
+            fft_fit: false,
             cursors: Cursors::default(),
             measure,
             y_axis,

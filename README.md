@@ -72,7 +72,9 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
   shown in the time plot (zoom in to analyse a part). Windows Rectangular,
   Hanning, Hamming, Blackman-Harris and Flat top; scale dBV or V RMS; drawn
   as a line or as bars (one bar per frequency bin); peak readout (frequency
-  interpolated between bins), Δf and N.
+  interpolated between bins), Δf and N. The wheel zooms and a drag pans the
+  spectrum; **⛶ Fit** next to the readouts (or a double-click) returns to the
+  start view.
 - **▤ Measure**: choose the automatic measurements to show (Freq, Period, Vpp,
   Vmax, Vmin, Vtop, Vbase, Vamp, Mean, RMS, Rise, Fall, +Width, −Width, +Duty),
   the channels, and the samples to measure: **Screen** (the time span shown

@@ -330,6 +330,16 @@ impl ScopeApp {
             } else {
                 "Samples used (the time span shown)"
             });
+            if ui
+                .small_button("⛶ Fit")
+                .on_hover_text(
+                    "Show the spectrum up to 20 × the peak frequency, with all levels \
+                     (the start view). Double-click on the FFT plot does the same.",
+                )
+                .clicked()
+            {
+                self.fft_fit = true;
+            }
         });
         let points: Vec<[f64; 2]> = spectrum
             .freqs
@@ -369,6 +379,9 @@ impl ScopeApp {
                 };
                 Some(format!("f = {}\n{y}", si(p.x, "Hz")))
             });
+        if std::mem::take(&mut self.fft_fit) {
+            plot = plot.reset();
+        }
         plot = if db {
             plot.y_axis_label(if logic { "dB (rel. to peak)" } else { "dBV" })
                 .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))

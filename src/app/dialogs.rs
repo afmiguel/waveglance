@@ -389,7 +389,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
             "Scale: dBV (0 dBV = 1 V RMS) or V RMS. A sine of amplitude A reads A/√2 V RMS.",
             "Draw: Line, or Bars (one bar per frequency bin, like a spectrum analyzer). Zoomed out, the bins in one screen column make one bar, at the highest level.",
             "Peak: the highest line above DC (white dot); its frequency is interpolated between bins. Δf: the frequency step; a longer time span gives a finer step.",
-            "The FFT plot opens up to 20 × the peak frequency; double-click it to return there; zoom out to see up to half the sample rate.",
+            "The FFT plot opens up to 20 × the peak frequency; ⛶ Fit (next to the readouts) or a double-click returns there; zoom out to see up to half the sample rate.",
         ],
     );
     section(

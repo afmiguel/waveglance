@@ -5,6 +5,15 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.20.0 — 2026-11-08
+
+- **Fit button for the FFT**: ⛶ Fit, next to the FFT readouts, returns the
+  spectrum to its start view (up to 20 × the peak frequency, all levels)
+  after a wheel zoom or a drag. A double-click on the FFT plot does the
+  same.
+- `scripts/copy-dpox.py`: copies the files from a DPOX180H by USB with small
+  reads, because the scope's USB disk disconnects on large reads.
+
 ## 0.19.0 — 2026-11-08
 
 - **DPOX180H: coupling and trigger.** The viewer now reads the AC/DC
