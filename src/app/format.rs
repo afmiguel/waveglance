@@ -172,3 +172,40 @@ pub fn si_bare(value: f64) -> String {
     let text = text.trim_end_matches('0').trim_end_matches('.');
     minus(format!("{text} {prefix}"))
 }
+
+/// How bus values are written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Radix {
+    #[default]
+    Hex,
+    Dec,
+    Bin,
+}
+
+impl Radix {
+    pub const ALL: [Self; 3] = [Self::Hex, Self::Dec, Self::Bin];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hex => "Hex",
+            Self::Dec => "Dec",
+            Self::Bin => "Bin",
+        }
+    }
+}
+
+/// A bus value of `bits` bits: "3F" (hex, one digit per 4 bits), "63" or
+/// "00111111". "X" if a bit is unknown (NaN).
+pub fn bus_text(value: f64, bits: u16, radix: Radix) -> String {
+    if !value.is_finite() || value < 0.0 {
+        return "X".to_owned();
+    }
+    // Exact up to 2^53; wider values are rounded by the reader.
+    let v = value as u64;
+    let bits = usize::from(bits.clamp(1, 64));
+    match radix {
+        Radix::Hex => format!("{v:0width$X}", width = bits.div_ceil(4)),
+        Radix::Dec => v.to_string(),
+        Radix::Bin => format!("{v:0bits$b}"),
+    }
+}

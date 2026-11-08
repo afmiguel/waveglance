@@ -20,6 +20,8 @@ impl ScopeApp {
             .waveform
             .as_ref()
             .and_then(|w| w.traces.get(self.search.source))
+            // A bus has values, not edges.
+            .filter(|t| !t.is_bus())
             .map(|t| measure::find_events(t.points(), kind, MIN_AMPLITUDE_DIV * t.display.per_div))
             .unwrap_or_default();
     }

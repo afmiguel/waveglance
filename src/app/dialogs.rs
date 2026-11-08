@@ -320,7 +320,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         &[
             "Drop a file on the window, or use ⏏ File ▾ → Open file….",
             "File ▾ → Open example: real FNIRSI 1013D and Rigol captures to try the viewer without a scope.",
-            "Supported: FNIRSI DPOX180H, FNIRSI 1013D/1014D (original firmware), Keysight/Agilent .bin, Rigol .bin and .wfm (DS1000Z, DS1000E/D, DS2000), VCD (logic analyzers: digital signals in lanes at the bottom), and CSV/text tables from any oscilloscope (Keysight, Rigol, Tektronix, Siglent… and this viewer's own export). The format is found automatically; the maker and model are shown at the top left.",
+            "Supported: FNIRSI DPOX180H, FNIRSI 1013D/1014D (original firmware), Keysight/Agilent .bin, Rigol .bin and .wfm (DS1000Z, DS1000E/D, DS2000), VCD (logic analyzers: digital signals and buses in lanes at the bottom), and CSV/text tables from any oscilloscope (Keysight, Rigol, Tektronix, Siglent… and this viewer's own export). The format is found automatically; the maker and model are shown at the top left.",
             "If the format is not certain, a window asks which one it is. If a file cannot be read, the red banner has an \"Open as…\" button to choose the format yourself.",
             "CSV: the first number column is the time (s), the others are channels; the names come from the header line. Files with up to millions of samples are drawn fast: only the part in view, at about two points per pixel.",
             "The file is read on this device; nothing is uploaded.",
@@ -349,6 +349,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
             "⊕ Zoom: an overview of the whole record above the plot. The bright window is the part shown below. Click or drag in it to move there; wheel on it to zoom in time.",
             "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both. Scope screen: the time window the scope showed (a file opens on it when it stores it).",
             "Logic signals only (VCD): the axis is \"Logic\"; Y, Math, voltage cursors and voltage measurements are off; the FFT shows frequencies, with levels in dB relative to the peak.",
+            "Buses (VCD): the value of each part is written in its lane. Right-click the bus readout at the bottom: Hex, Dec or Bin. Hover a bus lane to read the value at the pointer.",
         ],
     );
     section(

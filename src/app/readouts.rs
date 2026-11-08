@@ -7,6 +7,7 @@ impl ScopeApp {
     /// On-screen display: the digital readouts of the scope.
     pub(super) fn osd(&mut self, ui: &mut egui::Ui) {
         // V/div, probe factor and, if the file stores it, the input coupling.
+        let buses: Vec<Option<u16>> = self.traces().iter().map(|t| t.bus).collect();
         let channels: Vec<(String, f64, String, TraceUnit)> = self
             .traces()
             .iter()
@@ -29,6 +30,26 @@ impl ScopeApp {
             for (i, (name, vdiv, probe, unit)) in channels.iter().enumerate() {
                 let (name, vdiv) = (name.as_str(), *vdiv);
                 let color = palette::channel(i);
+                // A bus: its width; a click hides or shows it, a right
+                // click chooses how the values are written.
+                if let Some(bits) = buses[i] {
+                    let text = format!("{bits}-bit bus · {}", self.bus_radix.label());
+                    let r = channel_button(ui, name, &text, color, self.visible[i]).on_hover_text(
+                        "Bus of digital signals. Click to hide or show it; right click (or long press): values in Hex, Dec or Bin.",
+                    );
+                    if r.clicked() {
+                        self.visible[i] = !self.visible[i];
+                    }
+                    r.context_menu(|ui| {
+                        ui.label("Bus values:");
+                        for radix in Radix::ALL {
+                            if ui.radio_value(&mut self.bus_radix, radix, radix.label()).clicked() {
+                                ui.close();
+                            }
+                        }
+                    });
+                    continue;
+                }
                 // A digital trace: no V/div; a click hides or shows it.
                 if *unit == TraceUnit::Logic {
                     if channel_button(ui, name, "logic", color, self.visible[i])
@@ -188,7 +209,8 @@ impl ScopeApp {
         let mut rows = Vec::new();
         let traces = self.traces();
         for (i, t) in traces.iter().enumerate() {
-            if self.measure.is_measured(&t.label) && self.visible[i] {
+            // A bus has values, not a waveform to measure.
+            if self.measure.is_measured(&t.label) && self.visible[i] && !t.is_bus() {
                 rows.push((
                     t.label.clone(),
                     TraceRef::File(t),
@@ -256,7 +278,7 @@ impl ScopeApp {
             .traces()
             .iter()
             .enumerate()
-            .any(|(i, t)| self.visible[i] && self.measure.is_measured(&t.label));
+            .any(|(i, t)| self.visible[i] && !t.is_bus() && self.measure.is_measured(&t.label));
         self.waveform.is_some()
             && !self.measure.selected.is_empty()
             && (any_trace || (self.math_available() && self.math_visible))
@@ -285,6 +307,17 @@ impl ScopeApp {
                     }
                     let (name, color) = (ch.label.as_str(), palette::channel(i));
                     let at = |t| cursors::value_at(ch.points(), t);
+                    // A bus: its values at T1 and T2 (a difference means
+                    // nothing for a bus).
+                    if let Some(bits) = ch.bus {
+                        let fmt = |v: Option<f64>| {
+                            v.map_or("—".to_owned(), |v| bus_text(v, bits, self.bus_radix))
+                        };
+                        tag(ui, name, color);
+                        item(ui, "@T1", &fmt(at(c.t[0])), color);
+                        item(ui, "@T2", &fmt(at(c.t[1])), color);
+                        continue;
+                    }
                     let lsb = ch.lsb();
                     let fmt = |v: Option<f64>| {
                         v.map_or("—".to_owned(), |v| {

@@ -172,6 +172,10 @@ pub struct Trace {
     /// Smallest time step the file can express, if known (the `$timescale`
     /// of a VCD file).
     pub time_resolution: Option<f64>,
+    /// A bus of digital signals: the number of bits. The values are the
+    /// bus value as a number (NaN if a bit is unknown: x or z). `None` for
+    /// other traces.
+    pub bus: Option<u16>,
     /// `[time, value]` pairs, made from the samples when first needed.
     points: OnceCell<Vec<[f64; 2]>>,
 }
@@ -187,6 +191,7 @@ impl Trace {
             resolution: None,
             range: None,
             time_resolution: None,
+            bus: None,
             points: OnceCell::new(),
         }
     }
@@ -194,6 +199,11 @@ impl Trace {
     /// A digital (logic) trace: values 0 and 1, drawn as steps in a lane.
     pub fn is_digital(&self) -> bool {
         matches!(self.id, TraceId::Digital(_))
+    }
+
+    /// A bus (several bits, shown as values in a lane).
+    pub fn is_bus(&self) -> bool {
+        self.bus.is_some()
     }
 
     /// The samples as `[time_s, value]` pairs (made once, then kept).

@@ -10,6 +10,7 @@ impl ScopeApp {
             ui.label("Needs two channels in the file.");
             return;
         }
+        let buses = self.bus_flags();
         let mut m = self.math;
         for op in MathOp::ALL {
             let text = match op {
@@ -25,7 +26,18 @@ impl ScopeApp {
                     ui.label(name);
                     for (i, label) in labels.iter().enumerate() {
                         let slot = if which == 0 { &mut m.a } else { &mut m.b };
-                        ui.radio_value(slot, i, RichText::new(label).color(palette::channel(i)));
+                        let r = ui
+                            .add_enabled(
+                                !buses[i],
+                                egui::RadioButton::new(
+                                    *slot == i,
+                                    RichText::new(label).color(palette::channel(i)),
+                                ),
+                            )
+                            .on_disabled_hover_text(BUS_NOT_HERE);
+                        if r.clicked() {
+                            *slot = i;
+                        }
                     }
                 });
             }
@@ -45,6 +57,7 @@ impl ScopeApp {
     /// Contents of the Search menu.
     pub(super) fn search_menu(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
+        let buses = self.bus_flags();
         let mut kind = self.search.kind;
         ui.radio_value(&mut kind, None, "Off");
         for k in measure::EventKind::ALL {
@@ -64,10 +77,14 @@ impl ScopeApp {
             ui.label("In:");
             for (i, name) in labels.iter().enumerate() {
                 if ui
-                    .radio(
-                        self.search.source == i,
-                        RichText::new(name).color(palette::channel(i)),
+                    .add_enabled(
+                        !buses[i],
+                        egui::RadioButton::new(
+                            self.search.source == i,
+                            RichText::new(name).color(palette::channel(i)),
+                        ),
                     )
+                    .on_disabled_hover_text(BUS_NOT_HERE)
                     .clicked()
                 {
                     self.search.source = i;
@@ -448,14 +465,22 @@ impl ScopeApp {
         // The channels of the loaded file (none before a file is open).
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
         let logic = self.logic_only();
+        let buses = self.bus_flags();
         let m = &mut self.measure;
         if !labels.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Channels:");
                 for (i, name) in labels.iter().enumerate() {
-                    let mut on = m.is_measured(name);
+                    let mut on = m.is_measured(name) && !buses[i];
                     if ui
-                        .checkbox(&mut on, RichText::new(name).color(palette::channel(i)))
+                        .add_enabled(
+                            !buses[i],
+                            egui::Checkbox::new(
+                                &mut on,
+                                RichText::new(name).color(palette::channel(i)),
+                            ),
+                        )
+                        .on_disabled_hover_text(BUS_NOT_HERE)
                         .changed()
                     {
                         m.set_measured(name, on);
@@ -526,13 +551,19 @@ impl ScopeApp {
         ui.checkbox(&mut self.fft.show, "Show FFT");
         ui.separator();
         ui.label("Source:");
+        let buses = self.bus_flags();
+        let source = self.fft_source();
         ui.horizontal_wrapped(|ui| {
             for (i, name) in labels.iter().enumerate() {
                 if ui
-                    .radio(
-                        self.fft.source == i,
-                        RichText::new(name).color(palette::channel(i)),
+                    .add_enabled(
+                        !buses[i],
+                        egui::RadioButton::new(
+                            source == Some(i),
+                            RichText::new(name).color(palette::channel(i)),
+                        ),
                     )
+                    .on_disabled_hover_text(BUS_NOT_HERE)
                     .clicked()
                 {
                     self.fft.source = i;
@@ -556,6 +587,16 @@ impl ScopeApp {
                 .small()
                 .color(palette::hint()),
         );
+    }
+}
+
+/// Hover text of a bus in a list of channels where buses do not apply.
+const BUS_NOT_HERE: &str = "A bus has values, not a waveform: not for this";
+
+impl ScopeApp {
+    /// For each trace: true if it is a bus.
+    fn bus_flags(&self) -> Vec<bool> {
+        self.traces().iter().map(Trace::is_bus).collect()
     }
 }
 

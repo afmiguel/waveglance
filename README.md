@@ -11,7 +11,7 @@ not certain, a window asks):
 | DPOX180H | `.wav`, variable size, big-endian | Full ADC buffer; real-time and equivalent-time modes |
 | 1013D, 1014D | `.wav`, 15000 bytes, little-endian | Original FNIRSI firmware only. 1500-sample buffer (30 divisions), coupling and trigger settings. The 1014D uses the 1013D format, but no 1014D file was tested |
 | Keysight / Agilent | `.bin` (AG01, AG03, AG10) | Up to 4 channels; volts or amperes; no V/div in the file (a V/div that fits is used) |
-| VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, `real` variables as analog traces; buses not shown yet |
+| VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, buses (up to 64 bits) as value lanes in hex, dec or bin, `real` variables as analog traces |
 | Rigol | `.bin` (MSO5000 RG01, DHO800/1000 RG03) | Same layout as Keysight `.bin` |
 | Rigol | `.wfm` (DS1000Z, DS1000E/D, DS2000) | V/div, probe, coupling and time/div from the file; 8-bit samples. Logic analyzer data is not read |
 | CSV / text, any oscilloscope | `.csv`, `.txt`: time + channel columns | Keysight, Rigol, Tektronix, Siglent layouts and this viewer's export; `,` `;` tab separators |
@@ -54,6 +54,8 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - Logic signals only (VCD): the y axis is "Logic"; Y, Math, voltage cursors
   and voltage measurements are off. The FFT shows frequencies, with levels in
   dB relative to the peak.
+- Buses (VCD): a lane with the value of each part written in it. Right-click
+  (or long-press) the bus readout in the bottom bar to choose Hex, Dec or Bin.
 - **⌖ Cursors** menu (Off / Time / Volt / Both, and *Bring to view*): drag a
   dashed cursor line to move it. The names T1, T2, V1, V2 are at the edges of
   the plot; a cursor outside the view shows an arrow there (◀T1, V2▲). The

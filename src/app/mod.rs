@@ -44,6 +44,8 @@ const VDIV_WHEEL_STEP: f32 = 40.0;
 /// Storage key of the Math channel.
 const MATH_KEY: &str = "math";
 const CURSOR_MODE_KEY: &str = "cursor_mode";
+/// Storage key of the way bus values are written (hex, dec, bin).
+const BUS_RADIX_KEY: &str = "bus_radix";
 /// Storage key of the FFT settings.
 const FFT_KEY: &str = "fft";
 /// Part of the plot area used by the time plot when the FFT is shown.
@@ -355,6 +357,8 @@ pub struct ScopeApp {
     math_visible: bool,
     /// Event search.
     search: Search,
+    /// How bus values are written (saved).
+    bus_radix: Radix,
     /// Screenshots arrive here (egui calls back after the frame is drawn).
     shot_tx: Sender<std::sync::Arc<egui::ColorImage>>,
     shot_rx: Receiver<std::sync::Arc<egui::ColorImage>>,
@@ -467,6 +471,10 @@ impl ScopeApp {
                 .unwrap_or_default(),
             math_visible: true,
             search: Search::default(),
+            bus_radix: cc
+                .storage
+                .and_then(|s| eframe::get_value(s, BUS_RADIX_KEY))
+                .unwrap_or_default(),
             shot_tx,
             shot_rx,
             visible: Vec::new(),
@@ -644,7 +652,8 @@ impl ScopeApp {
                         },
                         YAxis::Volts => YMap {
                             scale: volts_lane * 0.7,
-                            offset: lo - (k + 1.2) * volts_lane,
+                            // The first trace just under the analog range.
+                            offset: lo - (lanes as f64 - k + 0.2) * volts_lane,
                         },
                     });
                 }
@@ -710,6 +719,9 @@ impl ScopeApp {
             && self.math.a != self.math.b
             && self.math.a < n
             && self.math.b < n
+            // A bus value is a number, not a voltage.
+            && !self.traces()[self.math.a].is_bus()
+            && !self.traces()[self.math.b].is_bus()
     }
 
     /// Label of the Math channel: "CH1 − CH2".
@@ -833,6 +845,18 @@ impl ScopeApp {
             .map(|(t, map)| {
                 let Some(m) = map else { return Vec::new() };
                 let all = t.points();
+                // A bus has no level to draw: the corners of its lane give
+                // the time span and the height (the values are drawn on top,
+                // see `draw_bus_lanes`).
+                if t.is_bus() {
+                    return match (all.first(), all.last()) {
+                        (Some(a), Some(b)) => {
+                            let (lo, hi) = (m.to_plot(0.0), m.to_plot(1.0));
+                            vec![[a[0], lo], [a[0], hi], [b[0], hi], [b[0], lo]]
+                        }
+                        _ => Vec::new(),
+                    };
+                }
                 let part = match view {
                     Some(v) => {
                         // One sample of margin on each side, so the line
@@ -969,6 +993,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, FFT_KEY, &self.fft);
         eframe::set_value(storage, MATH_KEY, &self.math);
         eframe::set_value(storage, CURSOR_MODE_KEY, &self.cursors.mode);
+        eframe::set_value(storage, BUS_RADIX_KEY, &self.bus_radix);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
     }
 }
@@ -1107,5 +1132,56 @@ mod tests {
         use crate::measure::Measurement as M;
         assert!(M::Frequency.applies_to_logic() && M::DutyCycle.applies_to_logic());
         assert!(!M::Vpp.applies_to_logic() && !M::RiseTime.applies_to_logic());
+    }
+
+    #[test]
+    fn bus_values() {
+        use super::format::{Radix, bus_text};
+        assert_eq!(bus_text(165.0, 8, Radix::Hex), "A5");
+        assert_eq!(bus_text(5.0, 12, Radix::Hex), "005");
+        assert_eq!(bus_text(5.0, 4, Radix::Bin), "0101");
+        assert_eq!(bus_text(165.0, 8, Radix::Dec), "165");
+        assert_eq!(bus_text(f64::NAN, 8, Radix::Hex), "X");
+        assert_eq!(
+            bus_text(u64::MAX as f64, 64, Radix::Hex),
+            "FFFFFFFFFFFFFFFF"
+        );
+    }
+
+    #[test]
+    fn bus_segments_merge_close_changes() {
+        // Steps: 1 on 0..10, 2 on 10..10.1, 3 on 10.1..10.2, 4 on 10.2..20.
+        let p = [
+            [0.0, 1.0],
+            [10.0, 1.0],
+            [10.0, 2.0],
+            [10.1, 2.0],
+            [10.1, 3.0],
+            [10.2, 3.0],
+            [10.2, 4.0],
+            [20.0, 4.0],
+        ];
+        let seg = |s, e, v| super::plot::BusSegment {
+            start: s,
+            end: e,
+            value: v,
+        };
+        // Wide segments: all the values.
+        let all = super::plot::bus_segments(&p, &(0.0..=20.0), 0.01);
+        assert_eq!(all.len(), 4);
+        assert_eq!(all[1], seg(10.0, 10.1, Some(2.0)));
+        // 1 unit per pixel: the two short segments become one busy band.
+        let close = super::plot::bus_segments(&p, &(0.0..=20.0), 1.0);
+        assert_eq!(
+            close,
+            [
+                seg(0.0, 10.0, Some(1.0)),
+                seg(10.0, 10.2, None),
+                seg(10.2, 20.0, Some(4.0))
+            ]
+        );
+        // A view inside one segment: only that segment.
+        let inside = super::plot::bus_segments(&p, &(12.0..=15.0), 0.01);
+        assert_eq!(inside, [seg(10.2, 20.0, Some(4.0))]);
     }
 }

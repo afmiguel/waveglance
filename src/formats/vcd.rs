@@ -7,7 +7,7 @@
 //! $scope module top $end
 //! $var wire 1 ! clk $end        1-bit signal, identifier "!"
 //! $var real 64 " vout $end      analog value
-//! $var wire 8 # data $end       bus (not shown yet)
+//! $var wire 8 # data $end       bus (8 bits)
 //! $upscope $end
 //! $enddefinitions $end
 //! #0                            time (in timescale units)
@@ -20,7 +20,8 @@
 //! - 1-bit signals become digital traces (0/1; `x` and `z` are shown as
 //!   0.5), drawn as steps.
 //! - `real` variables become analog traces (volts).
-//! - Buses (more than 1 bit) are not shown yet (a warning says so).
+//! - Buses (more than 1 bit, values `b0101 #`) become bus traces: the value
+//!   as a number, NaN if a bit is `x` or `z`.
 
 use super::{Confidence, Format, ReadError, nice_per_div};
 use crate::model::{Acquisition, Capture, Display, Samples, Source, Trace, TraceId, Unit};
@@ -54,6 +55,8 @@ impl Format for VcdFormat {
 struct Var {
     name: String,
     real: bool,
+    /// Bits of a bus; `None` for a 1-bit signal or a real.
+    bus: Option<u16>,
     /// Changes: (time in timescale units, value).
     changes: Vec<(u64, f64)>,
 }
@@ -82,6 +85,21 @@ fn bit(c: char) -> f64 {
         '1' => 1.0,
         _ => 0.5,
     }
+}
+
+/// The value of a vector `0101`, `x01`: a number, NaN if a bit is x or z.
+/// A short vector is extended to the left with 0, or with x / z if its first
+/// bit is x / z (IEEE 1364).
+fn vector(bits: &str) -> f64 {
+    let mut v = 0.0;
+    for c in bits.chars() {
+        v = match c {
+            '0' => v * 2.0,
+            '1' => v * 2.0 + 1.0,
+            _ => return f64::NAN,
+        };
+    }
+    v
 }
 
 /// The maker in a `$version` text: "sigrok 0.5" → "sigrok",
@@ -141,18 +159,21 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
                 if w.len() < 4 {
                     continue;
                 }
-                let (kind, size, id, name) = (w[0], w[1], w[2], w[3]);
+                let (kind, size, id) = (w[0], w[1], w[2]);
+                // "data [7:0]": the bit range is part of the name.
+                let name = w[3..].concat();
                 let real = kind == "real" || kind == "realtime";
-                let width: usize = size.parse().unwrap_or(1);
-                if !real && width != 1 {
+                let width: u16 = size.parse().unwrap_or(1);
+                if !real && width > 64 {
                     skipped_buses.push(format!("{name} ({width} bits)"));
                     continue;
                 }
                 if !ids.contains_key(id) {
                     ids.insert(id.to_owned(), vars.len());
                     vars.push(Var {
-                        name: name.to_owned(),
+                        name,
                         real,
+                        bus: (!real && width > 1).then_some(width),
                         changes: Vec::new(),
                     });
                 }
@@ -175,7 +196,10 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         1e-9
     });
     if !skipped_buses.is_empty() {
-        warnings.push(format!("buses not shown yet: {}", skipped_buses.join(", ")));
+        warnings.push(format!(
+            "buses wider than 64 bits not shown: {}",
+            skipped_buses.join(", ")
+        ));
     }
 
     // Value changes.
@@ -184,10 +208,22 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
     while let Some(tok) = tokens.next() {
         let mut set = |id: &str, v: f64, now: u64| {
             if let Some(&i) = ids.get(id) {
-                let ch = &mut vars[i].changes;
+                let var = &mut vars[i];
+                // A vector value of a 1-bit signal: x / z is 0.5.
+                let v = if var.bus.is_none() && !var.real && v.is_nan() {
+                    0.5
+                } else {
+                    v
+                };
+                let ch = &mut var.changes;
                 // Keep one value per time: the last one.
                 if ch.last().is_some_and(|c| c.0 == now) {
                     ch.pop();
+                }
+                // A digital value that does not change is not a change.
+                let same = |a: f64| a == v || (a.is_nan() && v.is_nan());
+                if !var.real && ch.last().is_some_and(|c| same(c.1)) {
+                    return;
                 }
                 ch.push((now, v));
             }
@@ -201,8 +237,9 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
             Some('$') => {} // $dumpvars, $end, $dumpall…: the values follow as usual
             Some(c @ ('0' | '1' | 'x' | 'X' | 'z' | 'Z')) => set(chars.as_str(), bit(c), now),
             Some('b' | 'B') => {
-                // Vector value: only for buses, which are skipped; consume the id.
-                tokens.next();
+                if let Some(id) = tokens.next() {
+                    set(id, vector(chars.as_str()), now);
+                }
             }
             Some('r' | 'R') => {
                 let v: f64 = chars.as_str().parse().unwrap_or(f64::NAN);
@@ -267,6 +304,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
             );
             tr.unit = Unit::Logic;
             tr.resolution = Some(1.0);
+            tr.bus = var.bus;
             tr
         };
         let mut trace = trace;
@@ -322,7 +360,9 @@ $end
 1!
 1\"
 r1.5 #
+b10100101 $
 #100
+bx1 $
 0!
 #150
 1!
@@ -332,13 +372,13 @@ r2.5 #
 ";
 
     #[test]
-    fn reads_bits_reals_and_skips_buses() {
+    fn reads_bits_reals_and_buses() {
         assert_eq!(VcdFormat.probe(SAMPLE.as_bytes()), Confidence::Sure);
         let w = read(SAMPLE.as_bytes()).unwrap();
         assert_eq!(w.source.vendor, "sigrok");
         let labels: Vec<&str> = w.traces.iter().map(|t| t.label.as_str()).collect();
-        assert_eq!(labels, ["clk", "en", "vout"]);
-        assert!(w.warnings.iter().any(|m| m.contains("data (8 bits)")));
+        assert_eq!(labels, ["clk", "en", "vout", "data"]);
+        assert!(w.warnings.is_empty(), "{:?}", w.warnings);
         let clk = &w.traces[0];
         assert!(clk.is_digital() && clk.unit == Unit::Logic);
         // Steps: at 500 ns the value goes from 0 to 1.
@@ -351,6 +391,38 @@ r2.5 #
         assert!(!vout.is_digital());
         assert_eq!(vout.points()[1], [5e-7, 1.5]);
         assert_eq!(w.time_per_div, Some(2e-7));
+        // data: 8-bit bus, 0, then 0xA5, then unknown, held to the end.
+        let data = &w.traces[3];
+        assert!(data.is_digital() && data.is_bus() && data.bus == Some(8));
+        let p = data.points();
+        assert_eq!(&p[..3], &[[0.0, 0.0], [5e-7, 0.0], [5e-7, 165.0]]);
+        assert_eq!(p[3], [1e-6, 165.0]);
+        assert!(p[4][1].is_nan() && p[4][0] == 1e-6);
+        assert_eq!(p.last().unwrap()[0], 2e-6);
+    }
+
+    #[test]
+    fn vectors() {
+        assert_eq!(vector("10100101"), 165.0);
+        assert_eq!(vector("1"), 1.0);
+        assert!(vector("1x0").is_nan());
+        assert!(vector("z").is_nan());
+        // A 1-bit signal given as a vector, and a bus name with its range.
+        let text = "$timescale 1 us $end
+$var wire 1 ! a $end
+$var reg 4 # cnt [3:0] $end
+$enddefinitions $end
+#0 b0 ! b0011 #
+#1 bx ! b0011 # b1 #
+#2 b1 !
+";
+        let w = read(text.as_bytes()).unwrap();
+        assert_eq!(w.traces[1].label, "cnt[3:0]");
+        let a = w.traces[0].points();
+        assert_eq!(a[2], [1e-6, 0.5], "x as a vector: 0.5");
+        // cnt: the same value again is not a change: 3 at 0, then 1 at 1 µs.
+        let cnt = w.traces[1].points();
+        assert_eq!(cnt, &[[0.0, 3.0], [1e-6, 3.0], [1e-6, 1.0], [2e-6, 1.0]]);
     }
 
     #[test]

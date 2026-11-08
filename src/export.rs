@@ -31,6 +31,10 @@ pub fn csv(w: &Capture, file_name: &str, app_version: &str) -> String {
         }
     }
     for t in &w.traces {
+        if let Some(bits) = t.bus {
+            let _ = writeln!(out, "# {}: {bits}-bit bus, decimal values", t.label);
+            continue;
+        }
         let coupling = t
             .display
             .coupling
@@ -63,8 +67,16 @@ pub fn csv(w: &Capture, file_name: &str, app_version: &str) -> String {
             continue;
         };
         out.push_str(&num(t));
-        for p in &points {
+        for (p, trace) in points.iter().zip(&w.traces) {
             match p.get(i) {
+                // A bus value: the whole number ("x" if a bit is unknown).
+                Some(q) if trace.is_bus() => {
+                    if q[1].is_finite() {
+                        let _ = write!(out, ",{}", q[1] as u64);
+                    } else {
+                        out.push_str(",x");
+                    }
+                }
                 Some(q) => {
                     let _ = write!(out, ",{}", num(q[1]));
                 }

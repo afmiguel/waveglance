@@ -5,6 +5,26 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.16.0 — 2026-11-08
+
+Buses in VCD files.
+
+- **Buses** (VCD variables with more than 1 bit, up to 64) are shown in
+  their own lane, like on a logic analyzer: a hexagon for each value, with
+  the value written in it when it fits. Changes too close to see one by
+  one show as a filled band; zoom in to see the values. A value with an
+  unknown bit (`x` or `z`) shows as "X", in orange.
+- **Hex, Dec or Bin**: right-click (or long-press) the bus readout in the
+  bottom bar. The choice is kept for the next session.
+- Hover over a bus lane: the value at the pointer, and in decimal.
+- The time cursors show the bus value at T1 and T2.
+- A bus is not a waveform: it cannot be measured, and it is not a source
+  for the FFT, Math or Search (the menus say why).
+- CSV export writes bus values as whole numbers (`x` if unknown).
+- The bit range of a VCD name is kept: `count[7:0]`.
+- Fix: in Volts mode, the logic lanes were in the reverse order of the
+  file (the first signal was at the bottom).
+
 ## 0.15.0 — 2026-11-08
 
 The open items of the UI review, and logic signal rules.

@@ -44,6 +44,7 @@ impl ScopeApp {
     pub(super) fn overview(&mut self, ui: &mut egui::Ui, data: &[Vec<[f64; 2]>]) {
         let digital: Vec<bool> = self.traces().iter().map(Trace::is_digital).collect();
         let channels: Vec<&[[f64; 2]]> = data.iter().map(Vec::as_slice).collect();
+        let buses: Vec<bool> = self.traces().iter().map(Trace::is_bus).collect();
         let Some(full) = time_span(&channels) else {
             return;
         };
@@ -75,7 +76,8 @@ impl ScopeApp {
             .show(ui, |plot| {
                 for (i, points) in reduced.into_iter().enumerate() {
                     let color = palette::channel(i);
-                    if !points.is_empty() {
+                    // A bus has no level to draw at this size.
+                    if !points.is_empty() && !buses.get(i).copied().unwrap_or(false) {
                         plot.line(
                             Line::new("", points)
                                 .color(color)
@@ -134,16 +136,41 @@ impl ScopeApp {
         }
     }
 
+    /// The value of the bus under the pointer, for the hover label:
+    /// "data = 3F (hex) = 63". `None` if the pointer is not on a bus lane.
+    fn bus_hover(&self, ctx: &egui::Context, maps: &[Option<YMap>]) -> Option<String> {
+        let transform = self.last_transform.as_ref()?;
+        let pos = ctx.input(|i| i.pointer.latest_pos())?;
+        let at = transform.value_from_position(pos);
+        self.traces().iter().zip(maps).find_map(|(t, map)| {
+            let (bits, map) = (t.bus?, (*map)?);
+            let (lo, hi) = (map.to_plot(0.0), map.to_plot(1.0));
+            if !(lo.min(hi)..=lo.max(hi)).contains(&at.y) {
+                return None;
+            }
+            let v = cursors::value_at(t.points(), at.x)?;
+            let mut text = format!(
+                "{} = {} ({})",
+                t.label,
+                bus_text(v, bits, self.bus_radix),
+                self.bus_radix.label().to_lowercase()
+            );
+            if self.bus_radix != Radix::Dec && v.is_finite() {
+                text.push_str(&format!(" = {}", bus_text(v, bits, Radix::Dec)));
+            }
+            Some(text)
+        })
+    }
+
     /// The FFT source trace: the chosen one if the file has it, else the
     /// first one. `None` without a trace.
     pub(super) fn fft_source(&self) -> Option<usize> {
-        let n = self.traces().len();
-        if n == 0 {
-            None
-        } else if self.fft.source < n {
+        // A bus has values, not a waveform: no spectrum.
+        let t = self.traces();
+        if t.get(self.fft.source).is_some_and(|t| !t.is_bus()) {
             Some(self.fft.source)
         } else {
-            Some(0)
+            t.iter().position(|t| !t.is_bus())
         }
     }
 
@@ -410,6 +437,7 @@ impl ScopeApp {
         let screen = self.screen_window();
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
         let digital: Vec<bool> = self.traces().iter().map(Trace::is_digital).collect();
+        let buses: Vec<bool> = self.traces().iter().map(Trace::is_bus).collect();
         let reference_lines = self.reference_lines();
         let math = self.math_channel();
         let math_map = self.math_map(math.as_deref());
@@ -438,6 +466,7 @@ impl ScopeApp {
         // Digital lanes: the y axis has no value scale there.
         let lane_top = self.lane_zone_top();
         let in_lanes = move |y: f64| lane_top.is_some_and(|z| y < z);
+        let bus_hover = self.bus_hover(ui.ctx(), &maps);
         let logic_only = lane_top == Some(f64::INFINITY);
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
         plot = if divisions {
@@ -527,7 +556,9 @@ impl ScopeApp {
                         }
                         // Elsewhere: the pointer position, not a signal value.
                         HoverPosition::Elsewhere { position, .. } => {
-                            if in_lanes(position.y) {
+                            if let Some(text) = &bus_hover {
+                                format!("{}\n{text}", t(position))
+                            } else if in_lanes(position.y) {
                                 t(position)
                             } else if divisions {
                                 format!("{}\n{:.2} div", t(position), position.y)
@@ -663,7 +694,19 @@ impl ScopeApp {
                     );
                 }
                 for (i, (points, label)) in data.into_iter().zip(labels).enumerate() {
-                    if !points.is_empty() {
+                    // A bus is drawn after the plot, with its values; here
+                    // an invisible line keeps its lane in the automatic bounds.
+                    if buses[i] {
+                        plot.line(
+                            // (Fully transparent means "automatic colour"
+                            // to egui_plot: use alpha 1 and no width.)
+                            Line::new("", points)
+                                .color(Color32::from_rgba_premultiplied(0, 0, 0, 1))
+                                .width(0.0)
+                                .allow_band(false)
+                                .allow_hover(false),
+                        );
+                    } else if !points.is_empty() {
                         // Digital steps have two points at each edge time:
                         // egui_plot would merge them into filled bands.
                         plot.line(
@@ -689,6 +732,13 @@ impl ScopeApp {
         }
         let marker_maps = self.marker_maps();
         draw_ground_markers(ui, &response.transform, &marker_maps);
+        draw_bus_lanes(
+            ui,
+            &response.transform,
+            self.traces(),
+            &maps,
+            self.bus_radix,
+        );
         draw_lane_labels(ui, &response.transform, self.traces(), &maps);
         if on_plot {
             let pos = ui.ctx().input(|i| i.pointer.latest_pos());
@@ -1072,5 +1122,125 @@ pub(super) fn draw_lane_labels(
             egui::FontId::monospace(10.0),
             palette::channel(i),
         );
+    }
+}
+
+/// A part of a bus record with one value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct BusSegment {
+    pub start: f64,
+    pub end: f64,
+    /// The value; `None` for a part with changes too close to draw one by one.
+    pub value: Option<f64>,
+}
+
+/// The segments of bus `points` (steps: two points at each change) that
+/// cross `view`. Changes closer than `min_dt` make one `None` segment.
+pub(super) fn bus_segments(
+    points: &[[f64; 2]],
+    view: &RangeInclusive<f64>,
+    min_dt: f64,
+) -> Vec<BusSegment> {
+    let n = points.len();
+    // The last point at or before `t`: it holds the value from `t` on.
+    let last_at = |t: f64| points.partition_point(|p| p[0] <= t).saturating_sub(1);
+    let mut out: Vec<BusSegment> = Vec::new();
+    let mut i = last_at(*view.start());
+    while i + 1 < n && points[i][0] <= *view.end() {
+        let start = points[i][0];
+        let j = i + points[i..].partition_point(|p| p[0] <= start);
+        let Some(next) = points.get(j) else { break };
+        let end = next[0];
+        if end - start >= min_dt {
+            out.push(BusSegment {
+                start,
+                end,
+                value: Some(points[i][1]),
+            });
+            i = last_at(end);
+            continue;
+        }
+        // Changes too close: one busy segment up to the change after
+        // `start + min_dt`.
+        let k = last_at(start + min_dt);
+        let end = points[k][0];
+        match out.last_mut() {
+            Some(s) if s.value.is_none() && s.end == start => s.end = end,
+            _ => out.push(BusSegment {
+                start,
+                end,
+                value: None,
+            }),
+        }
+        i = k;
+    }
+    out
+}
+
+/// The buses in their lanes: a hexagon per value, with the value written
+/// in it when it fits; a filled band where the changes are too close.
+pub(super) fn draw_bus_lanes(
+    ui: &egui::Ui,
+    transform: &PlotTransform,
+    traces: &[Trace],
+    maps: &[Option<YMap>],
+    radix: Radix,
+) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame);
+    let view = transform.bounds().range_x();
+    // Seconds per screen point.
+    let dt_pt = transform.dvalue_dpos()[0].abs();
+    let font = egui::FontId::monospace(11.0);
+    for (i, (t, map)) in traces.iter().zip(maps).enumerate() {
+        let (Some(bits), Some(map)) = (t.bus, map) else {
+            continue;
+        };
+        let color = palette::channel(i);
+        let stroke = egui::Stroke::new(1.5, color);
+        let top = transform.position_from_point_y(map.to_plot(1.0));
+        let bottom = transform.position_from_point_y(map.to_plot(0.0));
+        let mid = (top + bottom) / 2.0;
+        let slant = ((bottom - top) / 4.0).clamp(1.0, 4.0);
+        // Out of the frame, the ends are not drawn (the painter clips).
+        let x = |t: f64| {
+            transform
+                .position_from_point_x(t)
+                .clamp(frame.left() - 20.0, frame.right() + 20.0)
+        };
+        for s in bus_segments(t.points(), &view, 3.0 * dt_pt) {
+            let (x0, x1) = (x(s.start), x(s.end));
+            let rect = egui::Rect::from_x_y_ranges(x0..=x1, top..=bottom);
+            let Some(v) = s.value else {
+                painter.rect_filled(rect, 0.0, color.gamma_multiply(0.45));
+                continue;
+            };
+            let d = slant.min((x1 - x0) / 2.0);
+            let shape = vec![
+                egui::pos2(x0, mid),
+                egui::pos2(x0 + d, top),
+                egui::pos2(x1 - d, top),
+                egui::pos2(x1, mid),
+                egui::pos2(x1 - d, bottom),
+                egui::pos2(x0 + d, bottom),
+            ];
+            // An unknown value (x or z bits): filled in the warning colour.
+            let fill = if v.is_nan() {
+                palette::warn().gamma_multiply(0.3)
+            } else {
+                Color32::TRANSPARENT
+            };
+            painter.add(egui::Shape::convex_polygon(shape, fill, stroke));
+            // The value, in the middle of the visible part.
+            let (a, b) = (
+                (x0 + d).max(frame.left()) + 2.0,
+                (x1 - d).min(frame.right()) - 2.0,
+            );
+            let galley = painter.layout_no_wrap(bus_text(v, bits, radix), font.clone(), color);
+            if galley.size().x <= b - a && galley.size().y <= bottom - top + 2.0 {
+                let pos = egui::pos2((a + b) / 2.0, mid) - galley.size() / 2.0;
+                painter.galley(pos, galley, color);
+            }
+        }
     }
 }
