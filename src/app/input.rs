@@ -230,8 +230,11 @@ impl ScopeApp {
             });
         }
         if key(Modifiers::NONE, Key::C) {
-            self.cursors.set_mode(match self.cursors.mode {
+            let logic = self.logic_only();
+            self.set_cursor_mode(match self.cursors.mode {
                 CursorMode::Off => CursorMode::Time,
+                // Logic only: Off and Time.
+                CursorMode::Time if logic => CursorMode::Off,
                 CursorMode::Time => CursorMode::Volt,
                 CursorMode::Volt => CursorMode::Both,
                 CursorMode::Both => CursorMode::Off,

@@ -43,6 +43,7 @@ const LIGHT_THEME_KEY: &str = "light_theme";
 const VDIV_WHEEL_STEP: f32 = 40.0;
 /// Storage key of the Math channel.
 const MATH_KEY: &str = "math";
+const CURSOR_MODE_KEY: &str = "cursor_mode";
 /// Storage key of the FFT settings.
 const FFT_KEY: &str = "fft";
 /// Part of the plot area used by the time plot when the FFT is shown.
@@ -209,6 +210,9 @@ pub enum Fit {
     Vertical,
     /// Horizontal fit, then vertical fit.
     Both,
+    /// Show the time window the scope showed on its screen (when the file
+    /// stores it). The voltage axis does not change.
+    Screen,
 }
 
 /// Vertical axis of the plot.
@@ -419,7 +423,7 @@ impl ScopeApp {
             .unwrap_or(false);
         let (inbox_tx, inbox_rx) = channel();
         let (shot_tx, shot_rx) = channel();
-        Self {
+        let mut app = Self {
             file_name: None,
             waveform: None,
             error: None,
@@ -469,7 +473,33 @@ impl ScopeApp {
             last_transform: None,
             inbox_tx,
             inbox_rx,
+        };
+        // The cursor mode of the last session (placed on the first file).
+        if let Some(mode) = cc
+            .storage
+            .and_then(|s| eframe::get_value::<CursorMode>(s, CURSOR_MODE_KEY))
+        {
+            app.cursors.set_mode(mode);
         }
+        app
+    }
+
+    /// True if the file has only digital (logic) traces: then voltage
+    /// cursors and volt values mean nothing.
+    pub(super) fn logic_only(&self) -> bool {
+        let t = self.traces();
+        !t.is_empty() && t.iter().all(Trace::is_digital)
+    }
+
+    /// Set the cursor mode; with only logic traces, the voltage cursors are
+    /// left out (Volt → Off, Both → Time).
+    pub(super) fn set_cursor_mode(&mut self, mode: CursorMode) {
+        let mode = match mode {
+            CursorMode::Volt if self.logic_only() => CursorMode::Off,
+            CursorMode::Both if self.logic_only() => CursorMode::Time,
+            m => m,
+        };
+        self.cursors.set_mode(mode);
     }
 
     /// Parse the bytes of a file and show the result.
@@ -537,15 +567,24 @@ impl ScopeApp {
                 self.file_name = Some(name);
                 self.load_count += 1;
                 self.marker_drag = None;
-                // New file: cursors at 1/4 and 3/4 of the waveform.
+                // Open on the scope screen window when the file has it (the
+                // record can be longer, like 30 divisions for 12 on screen).
+                let screen = self.screen_window();
+                if screen.is_some() {
+                    self.pending_fit = Some(Fit::Screen);
+                }
+                // New file: cursors at 1/4 and 3/4 of the screen window (or
+                // of the waveform).
                 let data = self.plot_data();
                 let channels: Vec<&[[f64; 2]]> = data.iter().map(Vec::as_slice).collect();
-                if let Some(time) = time_span(&channels)
+                if let Some(time) = screen.or_else(|| time_span(&channels))
                     && let Some(span) = voltage_span_in(&channels, &time)
                 {
                     self.cursors.place_in(&time, &span);
                 }
                 self.last_transform = None;
+                // Logic only: no voltage cursors.
+                self.set_cursor_mode(self.cursors.mode);
             }
             Err(e) => {
                 let what = if target == LoadTarget::Reference {
@@ -560,6 +599,15 @@ impl ScopeApp {
                 self.failed_file = Some((target, name, bytes.to_vec()));
             }
         }
+    }
+
+    /// The scope screen window of the file, if it has one that overlaps
+    /// the record.
+    fn screen_window(&self) -> Option<std::ops::RangeInclusive<f64>> {
+        let w = self.waveform.as_ref()?;
+        let (a, b) = w.screen?;
+        let record = w.time_span()?;
+        (b > a && a < *record.end() && b > *record.start()).then_some(a..=b)
     }
 
     /// The traces of the file shown (empty without a file).
@@ -656,7 +704,9 @@ impl ScopeApp {
     /// traces that exist in the file.
     fn math_available(&self) -> bool {
         let n = self.traces().len();
-        self.math.op != MathOp::Off
+        // Logic signals only: the operations work on voltages.
+        !self.logic_only()
+            && self.math.op != MathOp::Off
             && self.math.a != self.math.b
             && self.math.a < n
             && self.math.b < n
@@ -918,6 +968,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, ZOOM_VIEW_KEY, &self.zoom_view);
         eframe::set_value(storage, FFT_KEY, &self.fft);
         eframe::set_value(storage, MATH_KEY, &self.math);
+        eframe::set_value(storage, CURSOR_MODE_KEY, &self.cursors.mode);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
     }
 }
@@ -1019,10 +1070,12 @@ mod tests {
         assert_eq!(fmt_sig(1000.0, "Hz", 4, 0.0), "1.000 kHz");
         assert_eq!(fmt_sig(99_980.0, "Hz", 4, 0.0), "99.98 kHz");
         assert_eq!(fmt_sig(0.99996, "V", 4, 0.0), "1.000 V");
-        assert_eq!(fmt_sig(-30e-6, "s", 4, 0.0), "-30.00 µs");
+        assert_eq!(fmt_sig(-30e-6, "s", 4, 0.0), "−30.00 µs");
+        assert_eq!(fmt_sig(999.7, "Hz", 4, 0.0), "999.7 Hz");
+        assert_eq!(fmt_sig(999.96, "Hz", 4, 0.0), "1.000 kHz");
         // Resolution: 1 mV per code. Less than half a code is 0 V.
         assert_eq!(fmt_sig(10e-6, "V", 4, 1e-3), "0 V");
-        assert_eq!(fmt_sig(-0.99e-3, "V", 4, 1e-3), "-1 mV");
+        assert_eq!(fmt_sig(-0.99e-3, "V", 4, 1e-3), "−1 mV");
         assert_eq!(fmt_sig(0.5381, "V", 4, 1.25e-4), "538.1 mV");
         assert_eq!(fmt_sig(1.073, "V", 4, 1.25e-4), "1.073 V");
         assert_eq!(fmt_sig(f64::NAN, "V", 4, 0.0), "—");
@@ -1032,10 +1085,27 @@ mod tests {
     fn si_prefixes() {
         assert_eq!(si(0.2, "V"), "200 mV");
         assert_eq!(si(5e-9, "s"), "5 ns");
-        assert_eq!(si(-30e-6, "s"), "-30 µs");
+        assert_eq!(si(-30e-6, "s"), "−30 µs");
         assert_eq!(si(1.0, "V"), "1 V");
         assert_eq!(si(0.0, "V"), "0 V");
         assert_eq!(si(4e8, "Sa/s"), "400 MSa/s");
         assert_eq!(si(0.0125, "V"), "12.5 mV");
+    }
+
+    #[test]
+    fn hold_resample_keeps_the_level_until_the_next_change() {
+        // A step from 0 to 1 at t = 1 (two points at the same time).
+        let p = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [3.0, 1.0]];
+        assert_eq!(
+            super::plot::hold_resample(&p, 0.0, 0.5, 6),
+            [0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn logic_measurements() {
+        use crate::measure::Measurement as M;
+        assert!(M::Frequency.applies_to_logic() && M::DutyCycle.applies_to_logic());
+        assert!(!M::Vpp.applies_to_logic() && !M::RiseTime.applies_to_logic());
     }
 }

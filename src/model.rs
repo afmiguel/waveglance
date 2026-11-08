@@ -18,6 +18,9 @@ pub struct Capture {
     pub traces: Vec<Trace>,
     /// Seconds per horizontal division, if the file stores it.
     pub time_per_div: Option<f64>,
+    /// Time window the scope showed on its screen (start, end), if known.
+    /// The record can be longer; the viewer opens on this window.
+    pub screen: Option<(f64, f64)>,
     /// Trigger settings, if the file stores them.
     pub trigger: Option<Trigger>,
     pub acquisition: Acquisition,

@@ -241,14 +241,19 @@ impl ScopeApp {
                 YAxis::Volts => "Y: Volts ▾",
                 YAxis::Divisions => "Y: Div ▾",
             };
-            toolbar_menu(
-                ui,
-                true,
-                y_label.to_owned(),
-                "Vertical axis: volts, or divisions like the scope screen",
-                None,
-                |ui| self.y_axis_buttons(ui),
-            );
+            let logic = self.logic_only();
+            if logic {
+                logic_disabled(ui, "Y: Logic", "the lanes have no voltage axis");
+            } else {
+                toolbar_menu(
+                    ui,
+                    true,
+                    y_label.to_owned(),
+                    "Vertical axis: volts, or divisions like the scope screen",
+                    None,
+                    |ui| self.y_axis_buttons(ui),
+                );
+            }
             ui.add_space(8.0);
             if ui
                 .add_enabled(loaded, egui::Button::selectable(self.zoom_view, "⊕ Zoom"))
@@ -262,7 +267,11 @@ impl ScopeApp {
             }
             ui.add_space(8.0);
             let fft_label = if self.fft.show {
-                format!("∿ FFT: CH{} ▾", self.fft_source().map_or(1, |i| i + 1))
+                let name = self
+                    .fft_source()
+                    .and_then(|i| self.traces().get(i))
+                    .map_or("CH1".to_owned(), |t| t.label.clone());
+                format!("∿ FFT: {name} ▾")
             } else {
                 "∿ FFT ▾".to_owned()
             };
@@ -305,14 +314,18 @@ impl ScopeApp {
             } else {
                 format!("Σ Math: {} ▾", self.math_label())
             };
-            toolbar_menu(
-                ui,
-                loaded,
-                math_label,
-                "A channel computed from CH1 and CH2",
-                None,
-                |ui| self.math_menu(ui),
-            );
+            if logic {
+                logic_disabled(ui, "Σ Math ▾", "the Math operations work on voltages");
+            } else {
+                toolbar_menu(
+                    ui,
+                    loaded,
+                    math_label,
+                    "A channel computed from CH1 and CH2",
+                    None,
+                    |ui| self.math_menu(ui),
+                );
+            }
             ui.add_space(8.0);
             let search_label = match self.search.kind {
                 Some(k) => format!("⌕ Search: {} ▾", k.label()),
@@ -353,7 +366,7 @@ impl ScopeApp {
     /// The three Fit buttons.
     pub(super) fn fit_buttons(&mut self, ui: &mut egui::Ui) {
         for (label, fit, tip) in [
-            ("⬌ Fit H", Fit::Horizontal, "Show the full time span"),
+            ("⬌ Fit H", Fit::Horizontal, "Show the whole record"),
             (
                 "⬍ Fit V",
                 Fit::Vertical,
@@ -370,6 +383,21 @@ impl ScopeApp {
                 ui.close();
             }
         }
+        if ui
+            .add_enabled(
+                self.screen_window().is_some(),
+                egui::Button::new("Scope screen"),
+            )
+            .on_hover_text(
+                "Show the time window the scope showed on its screen (the file opens on it). \
+                 Fit H shows the whole record.",
+            )
+            .on_disabled_hover_text("This file does not store the screen window")
+            .clicked()
+        {
+            self.pending_fit = Some(Fit::Screen);
+            ui.close();
+        }
     }
 
     /// Contents of the "Cursors" menu: the mode (radio buttons) and an
@@ -385,11 +413,18 @@ impl ScopeApp {
             ),
             (CursorMode::Both, "Time and voltage cursors"),
         ] {
-            ui.radio_value(&mut mode, m, cursor_mode_name(m))
-                .on_hover_text(tip);
+            // Logic only: voltage cursors measure nothing.
+            let enabled = !(self.logic_only() && m.shows_volt());
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.radio_value(&mut mode, m, cursor_mode_name(m))
+                    .on_hover_text(tip)
+                    .on_disabled_hover_text(
+                        "Only logic signals in this file: voltage cursors measure nothing",
+                    );
+            });
         }
         if mode != self.cursors.mode {
-            self.cursors.set_mode(mode);
+            self.set_cursor_mode(mode);
             ui.close();
         }
         ui.separator();
@@ -412,6 +447,7 @@ impl ScopeApp {
     pub(super) fn measure_menu(&mut self, ui: &mut egui::Ui) {
         // The channels of the loaded file (none before a file is open).
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
+        let logic = self.logic_only();
         let m = &mut self.measure;
         if !labels.is_empty() {
             ui.horizontal_wrapped(|ui| {
@@ -448,11 +484,21 @@ impl ScopeApp {
         ui.separator();
         for item in Measurement::ALL {
             let mut on = m.is_selected(item);
-            if ui
-                .checkbox(&mut on, item.label())
+            // Logic signals: only time measurements mean something.
+            let enabled = !(logic && !item.applies_to_logic());
+            let r = ui
+                .add_enabled(enabled, egui::Checkbox::new(&mut on, item.label()))
                 .on_hover_text(item.description())
-                .changed()
-            {
+                .on_disabled_hover_text(format!(
+                    "{}\nNot for logic signals: {}",
+                    item.description(),
+                    if item.unit() == measure::Unit::Volt {
+                        "the level is only 0 or 1"
+                    } else {
+                        "the steps are ideal"
+                    }
+                ));
+            if r.changed() {
                 m.set_selected(item, on);
             }
         }
@@ -537,6 +583,12 @@ pub(super) fn toolbar_menu(
         contents(ui);
     });
     response.on_hover_text(tip);
+}
+
+/// A toolbar button that is off because the file has only logic signals.
+fn logic_disabled(ui: &mut egui::Ui, label: &str, why: &str) {
+    ui.add_enabled(false, egui::Button::new(label))
+        .on_disabled_hover_text(format!("Only logic signals in this file: {why}"));
 }
 
 /// Name of a cursor mode, for the menu.

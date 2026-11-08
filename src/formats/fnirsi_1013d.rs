@@ -194,6 +194,8 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ParseError> {
         },
         traces: [ch1, ch2].into_iter().flatten().collect(),
         time_per_div: Some(time_per_div_s),
+        // The screen shows 12 of the 30 divisions, around the trigger.
+        screen: Some((-6.0 * time_per_div_s, 6.0 * time_per_div_s)),
         trigger: Some(trigger),
         acquisition: Acquisition::RealTime {
             sample_rate_hz: 1.0 / dt,

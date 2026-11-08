@@ -109,7 +109,11 @@ impl ScopeApp {
                 readout(
                     ui,
                     "SEARCH",
-                    Some(format!("{} CH{} {at}/{n}", kind.label(), self.search.source + 1)),
+                    Some(format!(
+                        "{} {} {at}/{n}",
+                        kind.label(),
+                        w.traces.get(self.search.source).map_or("", |t| t.label.as_str())
+                    )),
                     palette::fg_dim(),
                 )
                 .on_hover_text("Search menu: [ and ] go to the previous and next event");
@@ -159,12 +163,12 @@ impl ScopeApp {
         let record = self.waveform.as_ref()?.time_span()?;
         let screen = || {
             self.last_transform.as_ref().map_or_else(
-                || (record.clone(), "record"),
-                |t| (t.bounds().range_x(), "screen"),
+                || (record.clone(), "Record"),
+                |t| (t.bounds().range_x(), "Screen"),
             )
         };
         Some(match self.measure.window {
-            measure::Window::Record => (record.clone(), "record"),
+            measure::Window::Record => (record.clone(), "Record"),
             measure::Window::Screen => screen(),
             measure::Window::Cursors if self.cursors.mode.shows_time() => {
                 let [a, b] = self.cursors.t;
@@ -213,36 +217,33 @@ impl ScopeApp {
         let Some((window, window_name)) = self.measure_window() else {
             return;
         };
+        ui.label(
+            RichText::new(format!("Measurements · {window_name}"))
+                .small()
+                .color(palette::hint()),
+        )
+        .on_hover_text("The samples measured: Measure ▾ → Samples");
         for (name, ch, color, clipped) in self.measured_channels(&window) {
             let r = self.measure_cached(&name, &ch, &window);
             let ch = &*ch;
             ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new(format!("{name} ({window_name})"))
-                        .monospace()
-                        .strong()
-                        .color(color),
-                );
+                tag(ui, &name, color);
                 // Voltage measurements mean nothing on a digital signal.
                 for m in self
                     .measure
                     .shown()
                     // Nor do rise and fall times: the steps are ideal.
-                    .filter(|m| {
-                        !(ch.is_digital()
-                            && (m.unit() == Unit::Volt
-                                || matches!(m, Measurement::RiseTime | Measurement::FallTime)))
-                    })
+                    .filter(|m| !ch.is_digital() || m.applies_to_logic())
                 {
                     let value = format_measurement(m, r.get(m), ch);
                     // A clipped signal hides its real peaks: voltage values
                     // are not reliable (the real Vpp is larger).
                     if clipped && m.unit() == Unit::Volt {
-                        readout(ui, m.label(), Some(format!("?{value}")), palette::warn()).on_hover_text(
+                        item(ui, m.label(), &format!("?{value}"), palette::warn()).on_hover_text(
                             format!("{}\n⚠ {name} is clipped in this window: the real value can be larger", m.description()),
                         );
                     } else {
-                        readout(ui, m.label(), Some(value), color).on_hover_text(m.description());
+                        item(ui, m.label(), &value, color).on_hover_text(m.description());
                     }
                 }
             });
@@ -268,16 +269,14 @@ impl ScopeApp {
             ui.horizontal_wrapped(|ui| {
                 let color = palette::time_cursor();
                 let fmt_t = |t| fmt_sig(t, "s", READOUT_DIGITS, 0.0);
-                readout(ui, "T1", Some(fmt_t(c.t[0])), color);
-                readout(ui, "T2", Some(fmt_t(c.t[1])), color);
-                readout(ui, "ΔT", Some(fmt_t(c.delta_t())), color);
-                readout(
+                item(ui, "T1", &fmt_t(c.t[0]), color);
+                item(ui, "T2", &fmt_t(c.t[1]), color);
+                item(ui, "ΔT", &fmt_t(c.delta_t()), color);
+                item(
                     ui,
                     "1/ΔT",
-                    Some(
-                        c.frequency()
-                            .map_or("—".to_owned(), |f| fmt_sig(f, "Hz", READOUT_DIGITS, 0.0)),
-                    ),
+                    &c.frequency()
+                        .map_or("—".to_owned(), |f| fmt_sig(f, "Hz", READOUT_DIGITS, 0.0)),
                     color,
                 );
                 for (i, ch) in self.traces().iter().enumerate() {
@@ -294,8 +293,10 @@ impl ScopeApp {
                     };
                     let (a, b) = (at(c.t[0]), at(c.t[1]));
                     let delta = a.zip(b).map(|(a, b)| b - a);
-                    let text = format!("@T1 {}  @T2 {}  Δ {}", fmt(a), fmt(b), fmt(delta));
-                    readout(ui, name, Some(text), color);
+                    tag(ui, name, color);
+                    item(ui, "@T1", &fmt(a), color);
+                    item(ui, "@T2", &fmt(b), color);
+                    item(ui, "Δ", &fmt(delta), color);
                 }
             });
         }
@@ -304,9 +305,9 @@ impl ScopeApp {
                 let color = palette::volt_cursor();
                 let fmt_v = |v| fmt_sig(v, "V", READOUT_DIGITS, 0.0);
                 if self.y_axis == YAxis::Volts {
-                    readout(ui, "V1", Some(fmt_v(c.v[0])), color);
-                    readout(ui, "V2", Some(fmt_v(c.v[1])), color);
-                    readout(ui, "ΔV", Some(fmt_v(c.delta_v())), color);
+                    item(ui, "V1", &fmt_v(c.v[0]), color);
+                    item(ui, "V2", &fmt_v(c.v[1]), color);
+                    item(ui, "ΔV", &fmt_v(c.delta_v()), color);
                     return;
                 }
                 // Divisions: the cursor lines are in divisions; each channel
@@ -317,21 +318,50 @@ impl ScopeApp {
                     let (name, ch_color) = (t.label.as_str(), palette::channel(i));
                     let Some(m) = maps[i] else { continue };
                     let (a, b) = (m.to_volts(c.v[0]), m.to_volts(c.v[1]));
-                    readout(
-                        ui,
-                        name,
-                        Some(format!(
-                            "V1 {}  V2 {}  ΔV {}",
-                            fmt_v(a),
-                            fmt_v(b),
-                            fmt_v(b - a)
-                        )),
-                        ch_color,
-                    );
+                    tag(ui, name, ch_color);
+                    item(ui, "V1", &fmt_v(a), ch_color);
+                    item(ui, "V2", &fmt_v(b), ch_color);
+                    item(ui, "ΔV", &fmt_v(b - a), ch_color);
                 }
             });
         }
     }
+}
+
+/// A channel name as a filled tag (dark text on the channel colour), like
+/// the channel labels of a scope.
+pub(super) fn tag(ui: &mut egui::Ui, name: &str, color: Color32) -> egui::Response {
+    ui.add(
+        egui::Label::new(
+            RichText::new(format!(" {name} "))
+                .monospace()
+                .strong()
+                .color(palette::screen_bg())
+                .background_color(color),
+        )
+        .wrap_mode(egui::TextWrapMode::Extend),
+    )
+}
+
+/// A measured value: a dim label and the value in the colour of its trace,
+/// without a box (the boxes are for the settings in the OSD).
+pub(super) fn item(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) -> egui::Response {
+    let font = egui::FontId::monospace(egui::TextStyle::Monospace.resolve(ui.style()).size);
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        label,
+        0.0,
+        egui::TextFormat::simple(font.clone(), palette::fg_dim()),
+    );
+    job.append(value, 6.0, egui::TextFormat::simple(font, color));
+    // One piece: a wrapped row moves the whole item to the next line.
+    let r = ui.add(
+        egui::Label::new(job)
+            .wrap_mode(egui::TextWrapMode::Extend)
+            .sense(egui::Sense::hover()),
+    );
+    ui.add_space(8.0);
+    r
 }
 
 /// One OSD readout: a coloured label and its value.
@@ -376,10 +406,18 @@ pub(super) fn channel_button(
     } else {
         (palette::off(), "Click to show this channel")
     };
-    let label = RichText::new(format!("{name} {text}"))
-        .monospace()
-        .strong()
-        .color(shown_color);
+    // The name as a filled tag, then the setting.
+    let font = egui::FontId::monospace(egui::TextStyle::Monospace.resolve(ui.style()).size);
+    let mut label = egui::text::LayoutJob::default();
+    label.append(
+        &format!(" {name} "),
+        0.0,
+        egui::TextFormat {
+            background: shown_color,
+            ..egui::TextFormat::simple(font.clone(), palette::screen_bg())
+        },
+    );
+    label.append(text, 6.0, egui::TextFormat::simple(font, shown_color));
     ui.add(
         egui::Button::new(label)
             .fill(Color32::TRANSPARENT)

@@ -106,7 +106,9 @@ pub fn fmt_sig(value: f64, unit: &str, digits: i32, resolution: f64) -> String {
     // rounded value (999.96 → 1.000 k, not 1000.0).
     let step = 10f64.powi(v.abs().log10().floor() as i32 - digits + 1);
     v = (v / step).round() * step;
-    let (scale, prefix) = si_prefix(v.abs());
+    // The value is already rounded (999.96 → 1000), so the prefix needs no
+    // tolerance: 999.7 stays "999.7 Hz", not "0.9997 kHz".
+    let (scale, prefix) = si_prefix_exact(v.abs());
     let scaled = v / scale;
     let magnitude = scaled.abs().log10().floor() as i32;
     let mut decimals = (digits - 1 - magnitude).max(0);
@@ -114,7 +116,25 @@ pub fn fmt_sig(value: f64, unit: &str, digits: i32, resolution: f64) -> String {
         let res_decimals = (-(resolution / scale).log10() - 1e-9).ceil() as i32;
         decimals = decimals.min(res_decimals.max(0));
     }
-    format!("{scaled:.*} {prefix}{unit}", decimals as usize)
+    minus(format!("{scaled:.*} {prefix}{unit}", decimals as usize))
+}
+
+/// The typographic minus sign "−" (U+2212) in place of the hyphen.
+fn minus(text: String) -> String {
+    match text.strip_prefix('-') {
+        Some(rest) => format!("−{rest}"),
+        None => text,
+    }
+}
+
+/// The SI prefix for a magnitude that is already rounded: (scale, prefix).
+fn si_prefix_exact(magnitude: f64) -> (f64, &'static str) {
+    let (scale, prefix) = si_prefix(magnitude);
+    if magnitude < scale * (1.0 - 1e-12) {
+        si_prefix(magnitude * 0.999)
+    } else {
+        (scale, prefix)
+    }
 }
 
 /// The SI prefix for a magnitude: (scale, prefix).
@@ -150,5 +170,5 @@ pub fn si_bare(value: f64) -> String {
     let (scale, prefix) = si_prefix(value.abs());
     let text = format!("{:.3}", value / scale);
     let text = text.trim_end_matches('0').trim_end_matches('.');
-    format!("{text} {prefix}")
+    minus(format!("{text} {prefix}"))
 }

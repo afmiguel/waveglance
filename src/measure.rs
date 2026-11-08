@@ -33,6 +33,14 @@ pub enum Measurement {
     DutyCycle,
 }
 
+impl Measurement {
+    /// True for the measurements that mean something on a logic (0/1)
+    /// signal: the time measurements, without rise and fall (ideal steps).
+    pub fn applies_to_logic(self) -> bool {
+        self.unit() != Unit::Volt && !matches!(self, Self::RiseTime | Self::FallTime)
+    }
+}
+
 /// Unit of a measurement, for display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {

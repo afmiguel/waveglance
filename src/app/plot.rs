@@ -113,8 +113,9 @@ impl ScopeApp {
             self.pending_view = Some(ViewCommand::CenterX(x));
         }
         if r.hovered() && pointer_on_background(ui.ctx()) {
-            let (delta, pos) = ui.input(|i| (wheel_delta(i), i.pointer.latest_pos()));
-            let amount = delta.x + delta.y;
+            let (delta, pos, modifiers) =
+                ui.input(|i| (wheel_delta(i), i.pointer.latest_pos(), i.modifiers));
+            let amount = zoom_amount(delta, modifiers);
             if amount != 0.0
                 && let Some(pos) = pos
             {
@@ -167,13 +168,50 @@ impl ScopeApp {
             span.start().to_bits(),
             span.end().to_bits(),
         );
+        // Uneven times (logic signals, some CSV files): the FFT needs evenly
+        // spaced samples, so the span is sampled at MAX_SAMPLES points.
+        let uneven = matches!(ch.samples, Samples::Timed(_));
+        let count = if uneven { fft::MAX_SAMPLES } else { count };
         if self.fft_cache.as_ref().map(|c| c.0) != Some(key) {
-            let values: Vec<f64> = points[a..b.max(a)].iter().map(|p| p[1]).collect();
-            let dt = ch.sample_interval().unwrap_or(0.0);
+            let (values, dt) = if uneven {
+                let (t0, t1) = (*span.start(), *span.end());
+                let dt = (t1 - t0) / fft::MAX_SAMPLES as f64;
+                let mut values = hold_resample(points, t0, dt, fft::MAX_SAMPLES);
+                // A logic level is mostly DC: remove the mean, so that the
+                // pulses, not the DC line, set the scale.
+                if ch.is_digital() {
+                    let mean = values.iter().sum::<f64>() / values.len() as f64;
+                    values.iter_mut().for_each(|v| *v -= mean);
+                }
+                (values, dt)
+            } else {
+                let values: Vec<f64> = points[a..b.max(a)].iter().map(|p| p[1]).collect();
+                (values, ch.sample_interval().unwrap_or(0.0))
+            };
             self.fft_cache = Some((key, fft::spectrum(&values, dt, self.fft.window)));
         }
         let spectrum = self.fft_cache.as_ref()?.1.clone()?;
         Some((source, spectrum, count.min(fft::MAX_SAMPLES)))
+    }
+
+    /// The shortest time between two changes of trace `i` in the span shown.
+    fn shortest_pulse(&self, i: usize) -> Option<f64> {
+        let points = self.traces().get(i)?.points();
+        let span = self.last_transform.as_ref()?.bounds().range_x();
+        let a = points.partition_point(|p| p[0] < *span.start());
+        let b = points.partition_point(|p| p[0] <= *span.end());
+        points[a..b.max(a)]
+            .windows(2)
+            .map(|w| w[1][0] - w[0][0])
+            .filter(|d| *d > 0.0)
+            .min_by(f64::total_cmp)
+    }
+
+    /// Time step of the even sampling of the span shown, for the FFT of a
+    /// trace with uneven times.
+    fn fft_span_step(&self) -> Option<f64> {
+        let span = self.last_transform.as_ref()?.bounds().range_x();
+        Some((span.end() - span.start()) / fft::MAX_SAMPLES as f64)
     }
 
     /// The FFT panel: a header with the peak, and the spectrum plot.
@@ -186,21 +224,44 @@ impl ScopeApp {
             return;
         };
         let color = palette::channel(source);
-        let db = self.fft.db;
-        let level = move |v: f64| if db { fft::dbv(v) } else { v };
-        let fmt_level = move |v: f64| {
-            if db {
-                format!("{:.1} dBV", fft::dbv(v))
+        let peak = spectrum.peak();
+        // A logic signal has no volts: levels in dB relative to the peak,
+        // and only frequencies in the readouts.
+        let logic = self.traces().get(source).is_some_and(Trace::is_digital);
+        // A logic level that does not change in the span: no spectrum.
+        if logic && peak.is_none_or(|(_, v)| v < 1e-9) {
+            ui.label(
+                RichText::new("FFT: the signal does not change in the time span shown")
+                    .color(palette::hint()),
+            );
+            return;
+        }
+        let reference = peak.map_or(1.0, |(_, v)| v.max(f64::MIN_POSITIVE));
+        let db = self.fft.db || logic;
+        let level = move |v: f64| {
+            if logic {
+                fft::dbv(v / reference)
+            } else if db {
+                fft::dbv(v)
             } else {
-                fmt_sig(v, "V", READOUT_DIGITS, 0.0)
+                v
             }
         };
-        let peak = spectrum.peak();
+        let db_unit = if logic { "dB" } else { "dBV" };
+        let fmt_level = move |v: f64| {
+            if logic {
+                String::new()
+            } else if db {
+                format!(" {:.1} dBV", fft::dbv(v))
+            } else {
+                format!(" {}", fmt_sig(v, "V", READOUT_DIGITS, 0.0))
+            }
+        };
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!(
-                    "FFT CH{} · {}",
-                    source + 1,
+                    "FFT {} · {}",
+                    self.traces().get(source).map_or("", |t| t.label.as_str()),
                     self.fft.window.label()
                 ))
                 .monospace()
@@ -212,7 +273,7 @@ impl ScopeApp {
                     ui,
                     "Peak",
                     Some(format!(
-                        "{} {}",
+                        "{}{}",
                         fmt_sig(pf, "Hz", READOUT_DIGITS, 0.0),
                         fmt_level(pv)
                     )),
@@ -223,8 +284,25 @@ impl ScopeApp {
                 readout(ui, "Δf", Some(fmt_sig(df, "Hz", 3, 0.0)), palette::fg_dim())
                     .on_hover_text("Frequency step between the FFT bins");
             }
-            readout(ui, "N", Some(count.to_string()), palette::fg_dim())
-                .on_hover_text("Samples used (the time span shown)");
+            // Logic: the even sampling must be finer than the pulses.
+            if logic && let Some(gap) = self.shortest_pulse(source) {
+                let dt = self.fft_span_step().unwrap_or(0.0);
+                if dt * 2.0 > gap {
+                    ui.label(
+                        RichText::new(format!(
+                            "⚠ zoom in: the span shown is sampled every {}, the shortest pulse is {}",
+                            fmt_sig(dt, "s", 3, 0.0),
+                            fmt_sig(gap, "s", 3, 0.0)
+                        ))
+                        .color(palette::warn_text()),
+                    );
+                }
+            }
+            readout(ui, "N", Some(count.to_string()), palette::fg_dim()).on_hover_text(if logic {
+                "Samples used: the time span shown, sampled evenly"
+            } else {
+                "Samples used (the time span shown)"
+            });
         });
         let points: Vec<[f64; 2]> = spectrum
             .freqs
@@ -239,7 +317,10 @@ impl ScopeApp {
         let f_max = peak.map_or(nyquist, |(pf, _)| {
             (pf * 20.0).clamp(nyquist / 1000.0, nyquist)
         });
-        let mut plot = Plot::new(("fft", self.load_count, source, db))
+        // A new view when the highest frequency changes (an uneven-time
+        // trace is sampled more finely when the time view is zoomed in).
+        let span_key = nyquist.log2().round() as i64;
+        let mut plot = Plot::new(("fft", self.load_count, source, db, span_key))
             .show_grid(true)
             .grid_color(palette::grid())
             .x_axis_label("Frequency")
@@ -252,14 +333,14 @@ impl ScopeApp {
                     HoverPosition::Elsewhere { position, .. } => position,
                 };
                 let y = if db {
-                    format!("{:.1} dBV", p.y)
+                    format!("{:.1} {db_unit}", p.y)
                 } else {
                     si(p.y, "V")
                 };
                 Some(format!("f = {}\n{y}", si(p.x, "Hz")))
             });
         plot = if db {
-            plot.y_axis_label("dBV")
+            plot.y_axis_label(if logic { "dB (rel. to peak)" } else { "dBV" })
                 .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
         } else {
             plot.y_axis_label("V RMS")
@@ -268,7 +349,7 @@ impl ScopeApp {
         plot.show(ui, |plot| {
             // Mouse wheel zooms, like the time plot.
             let (delta, modifiers) = plot.ctx().input(|i| (wheel_delta(i), i.modifiers));
-            let amount = delta.x + delta.y;
+            let amount = zoom_amount(delta, modifiers);
             if amount != 0.0 && plot.response().hovered() && pointer_on_background(plot.ctx()) {
                 let f = (amount / WHEEL_ZOOM_POINTS).exp();
                 let factor = if modifiers.shift {
@@ -326,6 +407,7 @@ impl ScopeApp {
         let max_points = (ui.available_width().max(200.0) * 2.0) as usize;
         let data = self.plot_data_in(view.as_ref(), max_points);
         let record_span = self.waveform.as_ref().and_then(Capture::time_span);
+        let screen = self.screen_window();
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
         let digital: Vec<bool> = self.traces().iter().map(Trace::is_digital).collect();
         let reference_lines = self.reference_lines();
@@ -464,13 +546,22 @@ impl ScopeApp {
                 let (delta, modifiers, pointer) = plot
                     .ctx()
                     .input(|i| (wheel_delta(i), i.modifiers, i.pointer.latest_pos()));
-                let amount = delta.x + delta.y;
+                // Over an axis, any wheel direction pans that axis.
+                let axis_amount = delta.x + delta.y;
+                let amount = zoom_amount(delta, modifiers);
+                // A horizontal swipe (trackpad) inside the frame moves the time.
+                let swipe = if modifiers.shift || modifiers.alt {
+                    0.0
+                } else {
+                    delta.x
+                };
                 let frame = *plot.transform().frame();
                 let zone = pointer.and_then(|p| axis_zone(p, frame, outer));
                 // An axis label area pans that axis; inside the plot frame the wheel zooms.
                 // (The plot response also covers the axis areas, so test the zones first.)
                 // Not through a window or menu on top of the plot (Help).
-                if amount != 0.0 && pointer_on_background(plot.ctx()) {
+                if (axis_amount != 0.0 || swipe != 0.0) && pointer_on_background(plot.ctx()) {
+                    let amount = if zone.is_some() { axis_amount } else { amount };
                     if let Some(axis) = zone {
                         // Pan by the wheel distance in screen points.
                         // Wheel up: earlier times (left) / higher voltages (up).
@@ -481,8 +572,13 @@ impl ScopeApp {
                         };
                         plot.translate_bounds(shift);
                     } else if pointer.is_some_and(|p| frame.contains(p)) {
+                        if swipe != 0.0 {
+                            let dx = plot.transform().dvalue_dpos()[0];
+                            plot.translate_bounds(egui::vec2((-f64::from(swipe) * dx) as f32, 0.0));
+                        }
                         let f = (amount / WHEEL_ZOOM_POINTS).exp();
-                        let factor = if modifiers.shift {
+                        // Logic signals only: the lanes keep their height.
+                        let factor = if modifiers.shift || logic_only {
                             egui::vec2(f, 1.0)
                         } else if modifiers.alt {
                             egui::vec2(1.0, f)
@@ -532,6 +628,11 @@ impl ScopeApp {
                         time = full.clone();
                         plot.set_plot_bounds_x(full);
                     }
+                    if fit == Fit::Screen
+                        && let Some(s) = screen.clone()
+                    {
+                        plot.set_plot_bounds_x(s);
+                    }
                     if matches!(fit, Fit::Vertical | Fit::Both)
                         && let Some(volts) = voltage_span_in(&channels, &time)
                     {
@@ -577,6 +678,7 @@ impl ScopeApp {
         self.cursors
             .update_pointer_icon(ui.ctx(), &response.transform);
         draw_trigger_marker(ui, &response.transform);
+        draw_cursor_tags(ui, &response.transform, &self.cursors);
         if self.search.kind.is_some() {
             draw_search_marks(
                 ui,
@@ -630,6 +732,32 @@ impl ScopeApp {
 /// events. Unlike `smooth_scroll_delta`, nothing carries over to the next
 /// frames, so a zoom or pan stops as soon as the wheel stops and never
 /// reaches another area that the pointer moves to.
+/// The wheel amount that zooms: the vertical wheel only, so a horizontal
+/// trackpad swipe pans instead. With Shift, browsers and some systems send
+/// the wheel as horizontal, so both directions count.
+/// `n` values at times `t0 + i·dt`: each the value of the last point at or
+/// before that time (a logic signal holds its level until the next change).
+pub(super) fn hold_resample(points: &[[f64; 2]], t0: f64, dt: f64, n: usize) -> Vec<f64> {
+    let mut out = Vec::with_capacity(n);
+    let mut k = 0;
+    for i in 0..n {
+        let t = t0 + i as f64 * dt;
+        while k + 1 < points.len() && points[k + 1][0] <= t {
+            k += 1;
+        }
+        out.push(points.get(k).map_or(0.0, |p| p[1]));
+    }
+    out
+}
+
+pub(super) fn zoom_amount(delta: egui::Vec2, modifiers: egui::Modifiers) -> f32 {
+    if modifiers.shift {
+        delta.x + delta.y
+    } else {
+        delta.y
+    }
+}
+
 pub(super) fn wheel_delta(input: &egui::InputState) -> egui::Vec2 {
     input
         .events
@@ -669,6 +797,81 @@ pub fn axis_zone(pos: egui::Pos2, frame: egui::Rect, outer: egui::Rect) -> Optio
 
 /// The trigger marker: a "T" in a small triangle on the top edge of the plot,
 /// at t = 0, like on a scope screen. Off screen, an arrow at the edge points to it.
+/// The name of each cursor at the edge of the plot: T1/T2 at the bottom of
+/// their lines, V1/V2 at the right. A cursor outside the view shows an arrow
+/// at the edge it is beyond ("◀T1", "V2▲"), so it is not lost.
+pub(super) fn draw_cursor_tags(ui: &egui::Ui, transform: &PlotTransform, cursors: &Cursors) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame.expand(1.0));
+    let font = egui::FontId::monospace(10.0);
+    let tag = |pos: egui::Pos2, align: egui::Align2, text: String, color: egui::Color32| {
+        let galley = painter.layout_no_wrap(text, font.clone(), color);
+        let rect = align.anchor_size(pos, galley.size()).expand(1.5);
+        painter.rect_filled(rect, 2.0, palette::screen_bg().gamma_multiply(0.85));
+        painter.galley(rect.min + egui::vec2(1.5, 1.5), galley, color);
+    };
+    if cursors.mode.shows_time() {
+        let color = palette::time_cursor();
+        for (i, &t) in cursors.t.iter().enumerate() {
+            let x = transform.position_from_point_x(t);
+            let y = frame.bottom() - 2.0 - 13.0 * i as f32;
+            let name = format!("T{}", i + 1);
+            if x < frame.left() {
+                tag(
+                    egui::pos2(frame.left() + 2.0, y),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("◀{name}"),
+                    color,
+                );
+            } else if x > frame.right() {
+                tag(
+                    egui::pos2(frame.right() - 2.0, y),
+                    egui::Align2::RIGHT_BOTTOM,
+                    format!("{name}▶"),
+                    color,
+                );
+            } else {
+                tag(
+                    egui::pos2(x + 2.0, frame.bottom() - 2.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    name,
+                    color,
+                );
+            }
+        }
+    }
+    if cursors.mode.shows_volt() {
+        let color = palette::volt_cursor();
+        for (i, &v) in cursors.v.iter().enumerate() {
+            let y = transform.position_from_point_y(v);
+            let x = frame.right() - 2.0 - 30.0 * i as f32;
+            let name = format!("V{}", i + 1);
+            if y < frame.top() {
+                tag(
+                    egui::pos2(x, frame.top() + 16.0),
+                    egui::Align2::RIGHT_TOP,
+                    format!("{name}▲"),
+                    color,
+                );
+            } else if y > frame.bottom() {
+                tag(
+                    egui::pos2(x, frame.bottom() - 16.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    format!("{name}▼"),
+                    color,
+                );
+            } else {
+                tag(
+                    egui::pos2(frame.right() - 2.0, y - 2.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    name,
+                    color,
+                );
+            }
+        }
+    }
+}
+
 pub(super) fn draw_trigger_marker(ui: &egui::Ui, transform: &PlotTransform) {
     let frame = *transform.frame();
     let x = transform.position_from_point_x(0.0);

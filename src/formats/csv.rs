@@ -415,6 +415,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         },
         traces,
         time_per_div,
+        screen: None,
         trigger: None,
         acquisition: Acquisition::RealTime {
             sample_rate_hz: if dt > 0.0 { 1.0 / dt } else { 0.0 },

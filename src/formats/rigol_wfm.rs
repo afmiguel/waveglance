@@ -180,9 +180,16 @@ impl Channel {
 /// What every family gives back.
 struct Parsed {
     model: String,
+    /// Time window shown on the scope screen.
+    screen: Option<(f64, f64)>,
     time_per_div: Option<f64>,
     channels: Vec<Channel>,
     warnings: Vec<String>,
+}
+
+/// The screen window: `divs` divisions of `tdiv` around `centre`.
+fn screen(centre: f64, tdiv: f64, divs: f64) -> Option<(f64, f64)> {
+    (tdiv > 0.0).then_some((centre - divs / 2.0 * tdiv, centre + divs / 2.0 * tdiv))
 }
 
 /// Read a Rigol `.wfm` file.
@@ -222,6 +229,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
             .map(Channel::into_trace)
             .collect(),
         time_per_div: parsed.time_per_div,
+        screen: parsed.screen,
         trigger: None,
         acquisition: Acquisition::RealTime {
             sample_rate_hz: if dt > 0.0 { 1.0 / dt } else { 0.0 },
@@ -318,6 +326,8 @@ fn ds1000z(b: &[u8]) -> Result<Parsed, ReadError> {
     }
     Ok(Parsed {
         model,
+        // 12 divisions around the horizontal position.
+        screen: screen(time_offset, ps_per_div as f64 * 1e-12, 12.0),
         time_per_div: (ps_per_div > 0).then_some(ps_per_div as f64 * 1e-12),
         channels,
         warnings,
@@ -404,6 +414,7 @@ fn ds1000e(b: &[u8]) -> Result<Parsed, ReadError> {
     }
     Ok(Parsed {
         model: "DS1000E/D".into(),
+        screen: screen(offset_ps as f64 * 1e-12, scale_ps as f64 * 1e-12, 12.0),
         time_per_div: (scale_ps > 0).then_some(scale_ps as f64 * 1e-12),
         channels,
         warnings,
@@ -497,6 +508,8 @@ fn ds2000(b: &[u8]) -> Result<Parsed, ReadError> {
     }
     Ok(Parsed {
         model: "DS2000".into(),
+        // 14 divisions around the horizontal position.
+        screen: screen(offset_ps as f64 * 1e-12, scale_ps as f64 * 1e-12, 14.0),
         time_per_div: (scale_ps > 0).then_some(scale_ps as f64 * 1e-12),
         channels,
         warnings,

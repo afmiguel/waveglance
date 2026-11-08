@@ -287,6 +287,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         },
         traces,
         time_per_div: (span > 0.0).then_some(span / 10.0),
+        screen: None,
         trigger: None,
         acquisition: Acquisition::RealTime {
             sample_rate_hz: 1.0 / unit_s,

@@ -156,6 +156,19 @@ fn wfm_files_open() {
     ] {
         assert_eq!(load(name).traces[0].display.probe, probe, "{name}");
     }
+    // The screen window: 12 divisions (DS1000Z, DS1000E) or 14 (DS2000)
+    // around the horizontal position, as in the CSV the scope saved.
+    for (name, a, b) in [
+        ("DS2072A-1.wfm", -3.5e-3, 3.5e-3),
+        ("DS1102E-B.wfm", -6e-6, 6e-6),
+        ("DS1074Z-B.wfm", 8.97e-3, 9.03e-3),
+    ] {
+        let (x, y) = load(name).screen.unwrap();
+        assert!(
+            (x - a).abs() < 1e-9 && (y - b).abs() < 1e-9,
+            "{name}: {x} {y}"
+        );
+    }
     // Only logic analyzer data: no analog channel is on.
     assert!(formats::open(&bytes("DS1074Z-C.wfm")).is_err());
 }

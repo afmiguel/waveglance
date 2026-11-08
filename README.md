@@ -38,6 +38,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - The welcome screen lists all the controls. The **? Help** button has the main instructions.
 - Mouse wheel: zoom. Shift + wheel: time axis only. Alt + wheel: voltage axis only.
 - Mouse wheel over a time or voltage axis: pan along that axis.
+- Trackpad: a vertical swipe zooms, a horizontal swipe pans the time axis.
 - Drag: pan. Double-click: reset the view.
 - **⊕ Zoom**: overview of the whole record above the plot; the bright window
   is the part shown. Click or drag in it to move there, wheel on it to zoom.
@@ -47,9 +48,16 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - Click the **CH1** or **CH2** readout at the bottom to hide or show that
   channel (its trace, ground marker, measurements and cursor values).
 - **⛶ Fit ▾** menu. **Fit H**: full time span. **Fit V**: voltage axis fitted to the samples between
-  the first and last instant shown. **Fit both**: Fit H, then Fit V.
+  the first and last instant shown. **Fit both**: Fit H, then Fit V. **Scope screen**:
+  the time window the scope showed; a file opens on it when it stores it
+  (1013D, Keysight and Rigol `.bin`, Rigol `.wfm`).
+- Logic signals only (VCD): the y axis is "Logic"; Y, Math, voltage cursors
+  and voltage measurements are off. The FFT shows frequencies, with levels in
+  dB relative to the peak.
 - **⌖ Cursors** menu (Off / Time / Volt / Both, and *Bring to view*): drag a
-  dashed cursor line to move it.
+  dashed cursor line to move it. The names T1, T2, V1, V2 are at the edges of
+  the plot; a cursor outside the view shows an arrow there (◀T1, V2▲). The
+  mode is kept for the next session.
   Time cursors show T1, T2, ΔT, 1/ΔT and each channel's voltage at T1 and T2
   (linear interpolation). Voltage cursors show V1, V2 and ΔV.
 - **Σ Math ▾**: CH1 + CH2, CH1 − CH2 or CH2 − CH1, measured like a channel.

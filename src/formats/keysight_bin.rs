@@ -149,6 +149,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
     let mut warnings = Vec::new();
     let mut model = String::new();
     let mut time_per_div = None;
+    let mut screen = None;
     let mut record_length = 0;
     for _ in 0..n_waveforms {
         let start = r.at;
@@ -158,7 +159,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         let points = r.u32()? as usize;
         let _count = r.u32()?;
         let x_display_range = r.f32()?;
-        let _x_display_origin = r.f64()?;
+        let x_display_origin = r.f64()?;
         let x_increment = r.f64()?;
         let x_origin = r.f64()?;
         let _x_units = r.u32()?;
@@ -175,6 +176,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         }
         if time_per_div.is_none() && x_display_range > 0.0 {
             time_per_div = Some(f64::from(x_display_range) / 10.0);
+            // Rigol stores the display origin as a positive number, like
+            // the x origin.
+            let start = if rigol {
+                -x_display_origin.abs()
+            } else {
+                x_display_origin
+            };
+            screen = Some((start, start + f64::from(x_display_range)));
         }
         let mut values: Option<Vec<f32>> = None;
         for _ in 0..n_buffers {
@@ -292,6 +301,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         },
         traces,
         time_per_div,
+        screen,
         trigger: None,
         acquisition: Acquisition::RealTime {
             sample_rate_hz: if dt > 0.0 { 1.0 / dt } else { 0.0 },

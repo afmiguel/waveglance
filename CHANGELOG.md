@@ -5,6 +5,36 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.15.0 — 2026-11-08
+
+The open items of the UI review, and logic signal rules.
+
+- **Opens on the scope screen.** Files that store the time window the
+  scope showed open on it (the record can be longer: the 1013D keeps 30
+  divisions for 12 on screen). This applies to the 1013D, Keysight and Rigol
+  `.bin`, and Rigol `.wfm`. Fit ▾ → **Scope screen** goes back to it; Fit H
+  shows the whole record.
+- **Cursors**: the names T1, T2, V1, V2 are at the edges of the plot, and a
+  cursor outside the view shows an arrow there (◀T1, V2▲). The grab
+  distance is 8 points with a mouse and 20 with a finger. The cursor mode
+  is kept for the next session.
+- **Trackpad**: a vertical swipe zooms, a horizontal swipe moves along the
+  time axis (before, both zoomed).
+- **Readouts**: channel names are filled tags, like on the scope. The
+  measurement and cursor values have no box (dim name, value in the trace
+  colour); the boxes are for the settings in the bottom bar. The samples
+  measured (Screen, Record, T1–T2) are named once, above the measurements.
+  Negative values use the minus sign "−". 999.7 Hz no longer reads
+  "0.9997 kHz".
+- **Logic signals only** (VCD):
+  - Y, Math and the voltage cursors are off (the menus say why).
+  - Only the time measurements can be ticked (Freq, Period, widths, duty).
+  - The wheel zooms only the time axis.
+  - The FFT shows frequencies only, with levels in dB relative to the peak.
+    The span shown is sampled evenly; a warning asks to zoom in when that
+    sampling is coarser than the shortest pulse.
+  - The search readout names the trace (D0, not CH1).
+
 ## 0.14.2 — 2026-11-07
 
 Fixes for digital (VCD) signals, found with a Wokwi logic analyzer file:

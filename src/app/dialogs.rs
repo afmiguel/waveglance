@@ -343,10 +343,12 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         &[
             "Mouse wheel on the plot: zoom. Shift + wheel: time only. Alt + wheel: volts only.",
             "Mouse wheel on the time or voltage axis: move along that axis.",
+            "Trackpad: a vertical swipe zooms, a horizontal swipe moves along the time axis.",
             "Drag: move. Double-click: back to the start view.",
             "Touch: pinch to zoom, drag to move, double-tap to reset.",
             "⊕ Zoom: an overview of the whole record above the plot. The bright window is the part shown below. Click or drag in it to move there; wheel on it to zoom in time.",
-            "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both.",
+            "⬌ Fit H: whole record. ⬍ Fit V: vertical axis fitted to what is on screen now. ⛶ Fit both: both. Scope screen: the time window the scope showed (a file opens on it when it stores it).",
+            "Logic signals only (VCD): the axis is \"Logic\"; Y, Math, voltage cursors and voltage measurements are off; the FFT shows frequencies, with levels in dB relative to the peak.",
         ],
     );
     section(

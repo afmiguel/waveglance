@@ -271,6 +271,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ParseError> {
         },
         traces: [ch1, ch2].into_iter().flatten().collect(),
         time_per_div: Some(time_per_div_s),
+        screen: None,
         trigger: None,
         acquisition,
         record_length: n,

@@ -11,11 +11,22 @@ use eframe::egui::{self, CursorIcon, Pos2};
 use egui_plot::{HLine, LineStyle, PlotBounds, PlotTransform, PlotUi, VLine};
 use std::ops::RangeInclusive;
 
-/// Distance in screen points at which the pointer grabs a cursor line.
-pub const GRAB_DISTANCE: f32 = 6.0;
+/// Distance in screen points at which the mouse grabs a cursor line.
+pub const GRAB_DISTANCE: f32 = 8.0;
+/// The same for a finger on a touch screen (a finger is less precise).
+pub const GRAB_DISTANCE_TOUCH: f32 = 20.0;
+
+/// The grab distance for the pointer in use now.
+pub fn grab_distance(ctx: &egui::Context) -> f32 {
+    if ctx.input(|i| i.any_touches()) {
+        GRAB_DISTANCE_TOUCH
+    } else {
+        GRAB_DISTANCE
+    }
+}
 
 /// Which cursors are shown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CursorMode {
     #[default]
     Off,
@@ -171,8 +182,8 @@ impl Cursors {
         }
     }
 
-    /// The visible cursor line nearest to `pos`, within `GRAB_DISTANCE`.
-    pub fn hit(&self, transform: &PlotTransform, pos: Pos2) -> Option<CursorId> {
+    /// The visible cursor line nearest to `pos`, within `grab` points.
+    pub fn hit(&self, transform: &PlotTransform, pos: Pos2, grab: f32) -> Option<CursorId> {
         if !transform.frame().contains(pos) {
             return None;
         }
@@ -199,7 +210,7 @@ impl Cursors {
         }
         lines
             .into_iter()
-            .filter(|(_, d)| *d <= GRAB_DISTANCE)
+            .filter(|(_, d)| *d <= grab)
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(id, _)| id)
     }
@@ -229,7 +240,7 @@ impl Cursors {
             self.dragging = None;
         }
         let near = match (pos, last_transform) {
-            (Some(pos), Some(t)) => self.hit(t, pos),
+            (Some(pos), Some(t)) => self.hit(t, pos, grab_distance(ctx)),
             _ => None,
         };
         // A click on a window or menu on top of the plot does not grab a cursor.
@@ -251,7 +262,7 @@ impl Cursors {
         }
         let near = ctx
             .input(|i| i.pointer.latest_pos())
-            .and_then(|pos| self.hit(transform, pos));
+            .and_then(|pos| self.hit(transform, pos, grab_distance(ctx)));
         match self.dragging.or(near) {
             Some(CursorId::T1 | CursorId::T2) => ctx.set_cursor_icon(CursorIcon::ResizeHorizontal),
             Some(CursorId::V1 | CursorId::V2) => ctx.set_cursor_icon(CursorIcon::ResizeVertical),
