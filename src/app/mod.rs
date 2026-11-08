@@ -620,6 +620,28 @@ impl ScopeApp {
             .collect()
     }
 
+    /// The plot y below which digital lanes are drawn, where the y axis has
+    /// no value scale: `None` without lanes, infinity with lanes only.
+    pub(super) fn lane_zone_top(&self) -> Option<f64> {
+        let traces = self.traces();
+        let lanes = traces.iter().filter(|t| t.is_digital()).count();
+        if lanes == 0 {
+            return None;
+        }
+        if lanes == traces.len() {
+            return Some(f64::INFINITY);
+        }
+        match (self.y_axis, self.analog_span) {
+            // Volts: the lanes are under the analog range (see `y_maps`).
+            (YAxis::Volts, Some((lo, hi))) => {
+                let lane = if hi > lo { (hi - lo) * 0.15 } else { 1.0 };
+                Some(lo - 0.35 * lane)
+            }
+            // Divisions: the lanes share the screen; keep the scale.
+            _ => None,
+        }
+    }
+
     /// Mappings for the ground markers: analog traces only (a digital trace
     /// has a lane, not a ground marker).
     fn marker_maps(&self) -> Vec<Option<YMap>> {

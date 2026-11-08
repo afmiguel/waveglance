@@ -353,12 +353,16 @@ impl ScopeApp {
             outer.max.y = outer.min.y + outer.height() * TIME_PLOT_SHARE;
         }
         let divisions = self.y_axis == YAxis::Divisions;
+        // Digital lanes: the y axis has no value scale there.
+        let lane_top = self.lane_zone_top();
+        let in_lanes = move |y: f64| lane_top.is_some_and(|z| y < z);
+        let logic_only = lane_top == Some(f64::INFINITY);
         let mut plot = Plot::new(("scope", self.load_count, self.y_axis));
         plot = if divisions {
             // Like a scope screen: 8 divisions, a line per division, and
             // thinner lines at 1/5 division when zoomed in.
             plot.default_y_bounds(-SCREEN_DIVS_Y / 2.0, SCREEN_DIVS_Y / 2.0)
-                .y_axis_label("Divisions")
+                .y_axis_label(if logic_only { "Logic" } else { "Divisions" })
                 .y_grid_spacer(egui_plot::uniform_grid_spacer(|input| {
                     let s = input.base_step_size;
                     if s <= 0.2 {
@@ -369,17 +373,25 @@ impl ScopeApp {
                         [5.0, 20.0, 100.0]
                     }
                 }))
-                .y_axis_formatter(|mark, _| {
+                .y_axis_formatter(move |mark, _| {
                     let v = mark.value;
-                    if (v - v.round()).abs() < 1e-6 {
+                    if logic_only {
+                        String::new()
+                    } else if (v - v.round()).abs() < 1e-6 {
                         format!("{}", v.round() as i64)
                     } else {
                         String::new()
                     }
                 })
         } else {
-            plot.y_axis_label("Voltage")
-                .y_axis_formatter(|mark, _| si(mark.value, "V"))
+            plot.y_axis_label(if logic_only { "Logic" } else { "Voltage" })
+                .y_axis_formatter(move |mark, _| {
+                    if in_lanes(mark.value) {
+                        String::new()
+                    } else {
+                        si(mark.value, "V")
+                    }
+                })
         };
         if show_fft {
             plot = plot.height(outer.height());
@@ -433,7 +445,9 @@ impl ScopeApp {
                         }
                         // Elsewhere: the pointer position, not a signal value.
                         HoverPosition::Elsewhere { position, .. } => {
-                            if divisions {
+                            if in_lanes(position.y) {
+                                t(position)
+                            } else if divisions {
                                 format!("{}\n{:.2} div", t(position), position.y)
                             } else {
                                 format!("{}\npointer {}", t(position), si(position.y, "V"))

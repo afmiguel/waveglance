@@ -227,7 +227,12 @@ impl ScopeApp {
                 for m in self
                     .measure
                     .shown()
-                    .filter(|m| !(ch.is_digital() && m.unit() == Unit::Volt))
+                    // Nor do rise and fall times: the steps are ideal.
+                    .filter(|m| {
+                        !(ch.is_digital()
+                            && (m.unit() == Unit::Volt
+                                || matches!(m, Measurement::RiseTime | Measurement::FallTime)))
+                    })
                 {
                     let value = format_measurement(m, r.get(m), ch);
                     // A clipped signal hides its real peaks: voltage values
@@ -432,7 +437,7 @@ pub(super) fn stats_table(
 
 /// A standard deviation in the unit of measurement `m` (no "<" limit).
 pub(super) fn format_spread(m: Measurement, v: f64, ch: &Trace) -> String {
-    let dt = ch.sample_interval().unwrap_or(0.0).abs();
+    let dt = ch.time_step().unwrap_or(0.0);
     match m.unit() {
         Unit::Second => fmt_sig(v, "s", 3, dt / 10.0),
         Unit::Hertz => fmt_sig(v, "Hz", 3, 0.0),
@@ -447,7 +452,7 @@ pub(super) fn format_measurement(m: Measurement, value: Option<f64>, ch: &Trace)
     let Some(v) = value else {
         return "—".to_owned();
     };
-    let dt = ch.sample_interval().unwrap_or(0.0).abs();
+    let dt = ch.time_step().unwrap_or(0.0);
     match m.unit() {
         // Mean and RMS average many samples, so they resolve less than one code.
         Unit::Volt => {

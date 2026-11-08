@@ -166,6 +166,9 @@ pub struct Trace {
     /// Limits of the input range. A sample at a limit is clipped: the real
     /// signal can be beyond it.
     pub range: Option<(f64, f64)>,
+    /// Smallest time step the file can express, if known (the `$timescale`
+    /// of a VCD file).
+    pub time_resolution: Option<f64>,
     /// `[time, value]` pairs, made from the samples when first needed.
     points: OnceCell<Vec<[f64; 2]>>,
 }
@@ -180,6 +183,7 @@ impl Trace {
             display,
             resolution: None,
             range: None,
+            time_resolution: None,
             points: OnceCell::new(),
         }
     }
@@ -206,6 +210,23 @@ impl Trace {
         match &self.samples {
             Samples::Uniform { dt, .. } => Some(*dt),
             Samples::Timed(p) => p.get(1).map(|b| b[0] - p[0][0]),
+        }
+    }
+
+    /// Time resolution for readouts: the time resolution of the file if
+    /// known, else the sample interval, else (uneven times) the smallest
+    /// time between two points.
+    pub fn time_step(&self) -> Option<f64> {
+        if let Some(r) = self.time_resolution {
+            return Some(r);
+        }
+        match &self.samples {
+            Samples::Uniform { dt, .. } => Some(dt.abs()),
+            Samples::Timed(p) => p
+                .windows(2)
+                .map(|w| w[1][0] - w[0][0])
+                .filter(|d| *d > 0.0)
+                .min_by(f64::total_cmp),
         }
     }
 
