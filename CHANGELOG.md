@@ -5,6 +5,14 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.22.0 — 2026-11-08
+
+- New example **UART: complete session (4 lines)** (File ▾ → Open example →
+  Logic (VCD)): AT commands and answers at 115200 8N1 on `host_tx` and
+  `dev_tx`, with a break at the end (a framing error); NMEA sentences of a GPS
+  at 9600 8N1; an inverted RS-232 line at 19200 7E1 with one parity error.
+  Each line needs its own settings in Decode ▾.
+
 ## 0.21.0 — 2026-11-08
 
 - **Protocol decoder (⇄ Decode ▾), first protocol: UART.** Decodes a

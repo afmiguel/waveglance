@@ -161,6 +161,17 @@ pub const EXAMPLES: &[Example] = &[
         file: "example-vcd-uart-analog.vcd",
         bytes: include_bytes!("../assets/examples/vcd/uart-analog.vcd"),
     },
+    Example {
+        group: "Logic (VCD)",
+        label: "UART: complete session (4 lines)",
+        about: "Four serial lines with different settings. host_tx and dev_tx: AT commands \
+                and answers, 115200 8N1, then a break on dev_tx (framing error). gps: NMEA \
+                sentences, 9600 8N1. rs232: an inverted line, 19200 7E1 (Data bits 7, \
+                Parity Even, Idle Low), with one parity error. Use Decode ▾ → UART with \
+                Baud Auto, Show ASCII, and zoom in on the fast lines.",
+        file: "example-vcd-uart-session.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/uart-session.vcd"),
+    },
 ];
 
 #[cfg(test)]
@@ -177,20 +188,73 @@ mod tests {
         }
     }
 
-    fn decode_text(file: &str, label: &str) -> String {
+    fn decode_with(
+        file: &str,
+        label: &str,
+        uart: crate::decode::uart::Settings,
+    ) -> crate::decode::Decoded {
         let e = EXAMPLES.iter().find(|e| e.file.contains(file)).unwrap();
         let w = crate::formats::open(e.bytes).unwrap();
         let settings = crate::decode::Settings {
             protocol: crate::decode::Protocol::Uart,
+            uart,
             ..Default::default()
         };
         let d = crate::decode::decode(w.trace(label).unwrap(), &settings).unwrap();
         assert!(d.warnings.is_empty(), "{:?}", d.warnings);
-        assert!(d.frames.iter().all(|f| f.error.is_none()));
+        d
+    }
+
+    fn text(d: &crate::decode::Decoded) -> String {
         d.frames
             .iter()
             .map(|f| char::from_u32(f.value).unwrap())
             .collect()
+    }
+
+    fn decode_text(file: &str, label: &str) -> String {
+        let d = decode_with(file, label, Default::default());
+        assert!(d.frames.iter().all(|f| f.error.is_none()));
+        text(&d)
+    }
+
+    #[test]
+    fn uart_session_decodes_with_its_settings() {
+        use crate::decode::{FrameError, uart};
+        let host = decode_text("uart-session", "host_tx");
+        assert_eq!(host, "AT\r\nAT+TEMP?\r\nAT+NAME=FNIRSI\r\nAT+VER?\r\n");
+        // dev_tx: the answers, then the break (a 0 with a framing error).
+        let dev = decode_with("uart-session", "dev_tx", Default::default());
+        let (last, answers) = dev.frames.split_last().unwrap();
+        assert_eq!(last.error, Some(FrameError::Framing));
+        assert_eq!(last.value, 0);
+        assert!(answers.iter().all(|f| f.error.is_none()));
+        assert!(text(&dev).starts_with("\r\nOK\r\n\r\n+TEMP: 23.5 C\r\n"));
+        let gps = decode_text("uart-session", "gps");
+        assert!(gps.starts_with("$GPRMC,123519,A,"));
+        assert_eq!(gps.matches("\r\n").count(), 2);
+        assert!(dev.title.starts_with("115200"));
+        // rs232: 19200 7E1, idle low; character 9 has a wrong parity bit.
+        let rs = decode_with(
+            "uart-session",
+            "rs232",
+            uart::Settings {
+                data_bits: 7,
+                parity: uart::Parity::Even,
+                idle_low: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(text(&rs), "ID?\rFNIRSI DPOX180H\r");
+        let errors: Vec<usize> = rs
+            .frames
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.error == Some(FrameError::Parity))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(errors, [9]);
+        assert!(rs.title.starts_with("19200"));
     }
 
     #[test]

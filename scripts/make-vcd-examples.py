@@ -201,6 +201,96 @@ def uart_analog():
     return header("1 us", variables) + d.lines()
 
 
+def uart_frames(data, baud, t0_s, bits=8, parity="N", stop=1, gap_s=0.0, bad_parity=()):
+    """(time_s, level) changes of UART frames for the bytes `data`, from
+    `t0_s`, with `gap_s` of idle after each frame. `parity` is "N", "E" or
+    "O"; the bytes whose index is in `bad_parity` get the wrong parity bit.
+    Returns the changes and the end time."""
+    bit = 1.0 / baud
+    t = t0_s
+    out = []
+    for n, ch in enumerate(data):
+        levels = [0] + [(ch >> k) & 1 for k in range(bits)]
+        if parity != "N":
+            ones = bin(ch & ((1 << bits) - 1)).count("1")
+            p = ones % 2 if parity == "E" else 1 - ones % 2
+            if n in bad_parity:
+                p = 1 - p
+            levels.append(p)
+        levels += [1] * stop
+        for level in levels:
+            out.append((t, level))
+            t += bit
+        t += gap_s
+    return out, t
+
+
+def nmea(body):
+    """An NMEA sentence with its checksum: "$body*hh\\r\\n"."""
+    check = 0
+    for c in body.encode():
+        check ^= c
+    return f"${body}*{check:02X}\r\n"
+
+
+def uart_session():
+    """Four serial lines, as a logic analyzer records them (timescale 1 ns):
+
+    - host_tx: a host sends AT commands, 115200 baud, 8N1.
+    - dev_tx: the device answers, 115200 8N1. At the end it sends a break
+      (the line low for 2 ms): a framing error.
+    - gps: a GPS module sends two NMEA sentences, 9600 baud, 8N1.
+    - rs232: an RS-232 line before the transceiver (idle low, inverted),
+      19200 baud, 7 data bits, even parity, 1 stop bit. One character has a
+      wrong parity bit.
+    """
+    d = Dump()
+    for ident in "!\"#":
+        d.set(0, ident, 1)
+    d.set(0, "$", 0)  # rs232: idle low
+    host, dev = [], []
+    t = 0.5e-3
+    exchanges = [
+        ("AT\r\n", "\r\nOK\r\n"),
+        ("AT+TEMP?\r\n", "\r\n+TEMP: 23.5 C\r\nOK\r\n"),
+        ("AT+NAME=FNIRSI\r\n", "\r\n+NAME: FNIRSI\r\nOK\r\n"),
+        ("AT+VER?\r\n", "\r\n+VER: 1.4.2\r\nOK\r\n"),
+    ]
+    for cmd, answer in exchanges:
+        c, t = uart_frames(cmd.encode(), 115200, t, gap_s=2e-6)
+        host += c
+        a, t = uart_frames(answer.encode(), 115200, t + 400e-6)
+        dev += a
+        t += 3e-3
+    # A break: dev_tx low for 2 ms, then idle again.
+    dev += [(t, 0), (t + 2e-3, 1)]
+    gps, g_end = uart_frames(
+        (
+            nmea("GPRMC,123519,A,2526.570,S,04916.512,W,000.5,054.7,081126,,,A")
+            + nmea("GPGGA,123519,2526.570,S,04916.512,W,1,08,0.9,920.4,M,0.0,M,,")
+        ).encode(),
+        9600,
+        1.0e-3,
+        gap_s=20e-6,
+    )
+    rs, r_end = uart_frames(
+        "ID?\rFNIRSI DPOX180H\r".encode(), 19200, 2.0e-3, bits=7, parity="E", bad_parity=(9,)
+    )
+    rs = [(t, 1 - level) for t, level in rs]  # inverted line
+    end = max(t + 2.5e-3, g_end, r_end) + 1e-3
+    for ident, changes in (("!", host), ('"', dev), ("#", gps), ("$", rs)):
+        for t, level in changes:
+            d.set(round(t * 1e9), ident, level)
+    d.events.setdefault(round(end * 1e9), [])
+    variables = [
+        ("wire", 1, "!", "host_tx"),
+        ("wire", 1, '"', "dev_tx"),
+        ("wire", 1, "#", "gps"),
+        ("wire", 1, "$", "rs232"),
+    ]
+    return header("1 ns", variables) + d.lines()
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     files = [
@@ -208,6 +298,7 @@ def main():
         ("dac-sine.vcd", dac_sine()),
         ("uart-at.vcd", uart_at()),
         ("uart-analog.vcd", uart_analog()),
+        ("uart-session.vcd", uart_session()),
     ]
     for name, lines in files:
         (OUT / name).write_text("\n".join(lines) + "\n")

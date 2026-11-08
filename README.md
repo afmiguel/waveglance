@@ -73,7 +73,8 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
   the traces and listed under the plot in Hex, Dec, Bin or ASCII; click a word
   to show it; ⎘ Copy copies them all. Parity and framing errors are in the
   warning colour. The decoders are in `src/decode/` (one file per protocol);
-  I2C and SPI can be added the same way.
+  I2C and SPI can be added the same way. To try it: File ▾ → Open example →
+  Logic (VCD) → **UART: complete session (4 lines)**.
 - **▤ Measure → Statistics per cycle**: mean, min, max, σ and n of the time
   measurements, in a floating window.
 - **∿ FFT ▾** menu: spectrum of CH1 or CH2 under the plot, of the samples
