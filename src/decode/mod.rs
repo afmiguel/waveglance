@@ -1,6 +1,6 @@
 //! Protocol decoders (logic analyzer functions): serial data in one or
-//! more traces made into bytes. Protocols: UART (one line) and I2C (SDA
-//! and SCL).
+//! more traces made into bytes. Protocols: UART (one line), I2C (SDA and
+//! SCL) and SPI (a data line, SCLK and an optional CS).
 //!
 //! The part shared by all protocols is here:
 //!
@@ -14,6 +14,7 @@
 //! [`Protocol`] and its settings to [`Settings`].
 
 pub mod i2c;
+pub mod spi;
 pub mod uart;
 
 use crate::model::Trace;
@@ -159,6 +160,8 @@ pub enum FrameKind {
     Stop,
     /// I2C address byte: 7-bit address in `value`, and the direction.
     Address { read: bool },
+    /// SPI chip select: active (the start of a selection) or released.
+    Select { active: bool },
 }
 
 /// One decoded word.
@@ -186,23 +189,30 @@ pub enum Protocol {
     Off,
     Uart,
     I2c,
+    Spi,
 }
 
 impl Protocol {
     /// The protocols that a line can use.
-    pub const ALL: [Self; 2] = [Self::Uart, Self::I2c];
+    pub const ALL: [Self; 3] = [Self::Uart, Self::I2c, Self::Spi];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Off => "Off",
             Self::Uart => "UART",
             Self::I2c => "I2C",
+            Self::Spi => "SPI",
         }
     }
 
-    /// The protocol needs a clock line (I2C: SCL).
+    /// The protocol needs a clock line (I2C: SCL, SPI: SCLK).
     pub fn needs_clock(self) -> bool {
-        self == Self::I2c
+        matches!(self, Self::I2c | Self::Spi)
+    }
+
+    /// The protocol can use a chip select line (SPI: CS).
+    pub fn uses_select(self) -> bool {
+        self == Self::Spi
     }
 }
 
@@ -216,6 +226,7 @@ pub struct Settings {
     /// Threshold of an analog trace, in its unit; `None` = automatic.
     pub threshold: Option<f64>,
     pub uart: uart::Settings,
+    pub spi: spi::Settings,
 }
 
 impl Default for Settings {
@@ -225,6 +236,7 @@ impl Default for Settings {
             source: 0,
             threshold: None,
             uart: uart::Settings::default(),
+            spi: spi::Settings::default(),
         }
     }
 }
@@ -247,31 +259,46 @@ pub struct Decoded {
 }
 
 /// Decode `trace` with `settings`; `clock` is the clock line of a protocol
-/// that needs one (I2C: SCL, with `trace` the SDA line). `None` when the
+/// that needs one (I2C: SCL, with `trace` the SDA line; SPI: SCLK), and
+/// `select` the chip select line (SPI CS, optional). `None` when the
 /// protocol is Off or the trace is empty.
-pub fn decode(trace: &Trace, clock: Option<&Trace>, settings: &Settings) -> Option<Decoded> {
+pub fn decode(
+    trace: &Trace,
+    clock: Option<&Trace>,
+    select: Option<&Trace>,
+    settings: &Settings,
+) -> Option<Decoded> {
+    let logic_of = |t: &Trace| {
+        let (level, hysteresis) = threshold(t, settings.threshold);
+        to_logic(t, level, hysteresis)
+    };
     let (level, hysteresis) = threshold(trace, settings.threshold);
     let logic = to_logic(trace, level, hysteresis)?;
     let mut out = match settings.protocol {
         Protocol::Off => return None,
         Protocol::Uart => uart::decode(&logic, &settings.uart),
-        Protocol::I2c => {
-            let scl = clock.and_then(|c| {
-                let (level, hysteresis) = threshold(c, settings.threshold);
-                to_logic(c, level, hysteresis)
-            });
-            match scl {
-                Some(scl) => i2c::decode(&logic, &scl),
-                None => Decoded {
-                    title: "no clock line".to_owned(),
-                    frames: Vec::new(),
-                    warnings: vec!["choose the clock line (SCL) in the ▸ settings".to_owned()],
-                    threshold: 0.0,
-                    high: 0.0,
-                    low: 0.0,
-                },
+        Protocol::I2c | Protocol::Spi => match clock.and_then(logic_of) {
+            Some(clk) if settings.protocol == Protocol::I2c => i2c::decode(&logic, &clk),
+            Some(clk) => {
+                let cs = select.and_then(logic_of);
+                spi::decode(&logic, &clk, cs.as_ref(), &settings.spi)
             }
-        }
+            None => Decoded {
+                title: "no clock line".to_owned(),
+                frames: Vec::new(),
+                warnings: vec![format!(
+                    "choose the clock line ({}) in the ▸ settings",
+                    if settings.protocol == Protocol::I2c {
+                        "SCL"
+                    } else {
+                        "SCLK"
+                    }
+                )],
+                threshold: 0.0,
+                high: 0.0,
+                low: 0.0,
+            },
+        },
     };
     out.threshold = level;
     (out.low, out.high) = trace

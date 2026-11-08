@@ -371,6 +371,70 @@ def i2c_analog():
     return header("100 ns", variables) + d.lines()
 
 
+def spi_quarters(transactions, idle=8):
+    """(cs, sck, mosi, miso) for each quarter of a clock period, SPI mode 0
+    (clock idle low, data set while the clock is low, read on the rising
+    edge). Each transaction is a list of (mosi byte, miso byte); CS is low
+    during a transaction. MISO is high (pulled up) when nobody drives it."""
+    q = [(1, 0, 0, 1)] * idle
+    for tr in transactions:
+        q += [(0, 0, 0, 1)] * 2
+        for mosi, miso in tr:
+            for k in range(7, -1, -1):
+                o, i = (mosi >> k) & 1, (miso >> k) & 1
+                q += [(0, 0, o, i), (0, 1, o, i), (0, 1, o, i), (0, 0, o, i)]
+        q += [(0, 0, 0, 1)] * 2
+        q += [(1, 0, 0, 1)] * idle
+    return q
+
+
+def spi_flash():
+    """An SPI flash memory at 1 MHz (quarter period 250 ns), mode 0: read
+    the JEDEC ID (0x9F, answer EF 40 18), write enable (0x06), and read 9
+    bytes at address 0x000100 (0x03): "Hello SPI"."""
+    text = b"Hello SPI"
+    session = [
+        [(0x9F, 0xFF), (0x00, 0xEF), (0x00, 0x40), (0x00, 0x18)],
+        [(0x06, 0xFF)],
+        [(0x03, 0xFF), (0x00, 0xFF), (0x01, 0xFF), (0x00, 0xFF)]
+        + [(0x00, c) for c in text],
+    ]
+    d = Dump()
+    quarter = 250  # ns
+    for k, levels in enumerate(spi_quarters(session)):
+        for ident, level in zip("!\"#$", levels):
+            d.set(k * quarter, ident, level)
+    d.events.setdefault((k + 1) * quarter, [])
+    variables = [
+        ("wire", 1, "!", "cs"),
+        ("wire", 1, '"', "sck"),
+        ("wire", 1, "#", "mosi"),
+        ("wire", 1, "$", "miso"),
+    ]
+    return header("1 ns", variables) + d.lines()
+
+
+def spi_analog():
+    """Two channels of an oscilloscope on an SPI bus without CS: CH1 is
+    MOSI, CH2 is SCLK. 500 kHz, mode 0, 3.3 V, edges with a 0.1 us time
+    constant and +-40 mV of noise; one sample every 0.1 us. The command
+    0x9F, a pause, then 0x03 0x00 0x01 0x00."""
+    rng = random.Random(3)
+    q = spi_quarters([[(0x9F, 0xFF)], [(0x03, 0), (0x00, 0), (0x01, 0), (0x00, 0)]])
+    quarter, step, tau = 0.5, 0.1, 0.1  # us
+    d = Dump()
+    v = {"!": 0.0, '"': 0.0}
+    n = round(len(q) * quarter / step)
+    for k in range(n):
+        t = k * step
+        _, sck, mosi, _ = q[min(int(t / quarter), len(q) - 1)]
+        for ident, level in (("!", mosi), ('"', sck)):
+            v[ident] += (3.3 * level - v[ident]) * (1 - math.exp(-step / tau))
+            d.real(k, ident, v[ident] + rng.uniform(-0.04, 0.04))
+    variables = [("real", 64, "!", "CH1"), ("real", 64, '"', "CH2")]
+    return header("100 ns", variables) + d.lines()
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     files = [
@@ -381,6 +445,8 @@ def main():
         ("uart-session.vcd", uart_session()),
         ("i2c-sensor.vcd", i2c_sensor()),
         ("i2c-analog.vcd", i2c_analog()),
+        ("spi-flash.vcd", spi_flash()),
+        ("spi-analog.vcd", spi_analog()),
     ]
     for name, lines in files:
         (OUT / name).write_text("\n".join(lines) + "\n")

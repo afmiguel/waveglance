@@ -11,8 +11,8 @@ const ROW_MAX_WORDS: usize = 400;
 const CACHE_LEN: usize = 16;
 
 /// What a decode result depends on: the file, the line, the settings and
-/// the clock line.
-pub(super) type DecodeKey = (u64, String, decode::Settings, String);
+/// the clock and chip select lines.
+pub(super) type DecodeKey = (u64, String, decode::Settings, String, String);
 
 /// The decoder of one line (saved between sessions, found by the name of
 /// the line, so that it works again on the next file with that line).
@@ -22,29 +22,50 @@ pub(super) struct LineDecoder {
     pub label: String,
     pub on: bool,
     pub settings: decode::Settings,
-    /// The clock line of a protocol that needs one (I2C: SCL), by name.
+    /// The clock line of a protocol that needs one (I2C: SCL, SPI:
+    /// SCLK), by name.
     pub clock: String,
+    /// The chip select line (SPI CS), by name; empty for none.
+    pub select: String,
 }
 
 impl LineDecoder {
-    /// A new decoder for line `label`: I2C when its name says SDA (with the
-    /// line named SCL as clock, if `labels` has one), else UART.
+    /// A new decoder for line `label`, from the names of the lines: I2C
+    /// for SDA (clock: SCL), SPI for MOSI, MISO, SDO or SDI (clock: SCLK,
+    /// SCK or CLK; select: CS, SS or NSS), else UART.
     fn new(label: &str, labels: &[String]) -> Self {
-        let has = |l: &str, part: &str| l.to_lowercase().contains(part);
-        let scl = labels.iter().find(|l| has(l, "scl"));
-        let i2c = has(label, "sda");
+        let name = |l: &str| l.to_lowercase();
+        let find = |parts: &[&str]| {
+            labels
+                .iter()
+                .find(|l| parts.iter().any(|p| name(l).contains(p)))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let me = name(label);
+        let (protocol, clock, select) = if me.contains("sda") {
+            (Protocol::I2c, find(&["scl"]), String::new())
+        } else if ["mosi", "miso", "sdo", "sdi", "copi", "cipo"]
+            .iter()
+            .any(|p| me.contains(p))
+        {
+            (
+                Protocol::Spi,
+                find(&["sclk", "sck", "clk"]),
+                find(&["cs", "ss"]),
+            )
+        } else {
+            (Protocol::Uart, String::new(), String::new())
+        };
         Self {
             label: label.to_owned(),
             on: false,
             settings: decode::Settings {
-                protocol: if i2c { Protocol::I2c } else { Protocol::Uart },
+                protocol,
                 ..Default::default()
             },
-            clock: if i2c {
-                scl.cloned().unwrap_or_default()
-            } else {
-                String::new()
-            },
+            clock,
+            select,
         }
     }
 }
@@ -95,16 +116,24 @@ impl ScopeApp {
                     .find(|t| t.label == line.clock && !t.is_bus())
             })
             .flatten();
+        let select = (settings.protocol.uses_select() && !line.select.is_empty())
+            .then(|| {
+                self.traces()
+                    .iter()
+                    .find(|t| t.label == line.select && !t.is_bus())
+            })
+            .flatten();
         let key = (
             self.load_count,
             trace.label.clone(),
             settings,
             clock.map_or(String::new(), |c| c.label.clone()),
+            select.map_or(String::new(), |c| c.label.clone()),
         );
         if let Some((_, d)) = self.decode_cache.borrow().iter().find(|(k, _)| *k == key) {
             return d.clone();
         }
-        let d = decode::decode(trace, clock, &settings).map(Rc::new);
+        let d = decode::decode(trace, clock, select, &settings).map(Rc::new);
         let mut cache = self.decode_cache.borrow_mut();
         cache.retain(|(k, _)| k.0 == self.load_count);
         if cache.len() >= CACHE_LEN {
@@ -248,6 +277,9 @@ impl ScopeApp {
                                         }
                                     });
                                 }
+                                Protocol::Spi => {
+                                    spi_settings(ui, &label, i, &lines, d);
+                                }
                                 _ => uart_settings(ui, &label, &mut d.settings.uart),
                             }
                             if !digital[i] {
@@ -304,7 +336,12 @@ impl ScopeApp {
                 color,
             );
             ui.label(RichText::new(&d.title).monospace().color(palette::fg_dim()));
-            let mut count = format!("{} words", d.frames.len());
+            let words = d
+                .frames
+                .iter()
+                .filter(|f| matches!(f.kind, FrameKind::Data | FrameKind::Address { .. }))
+                .count();
+            let mut count = format!("{words} words");
             if errors > 0 {
                 count.push_str(&format!(", {errors} with errors"));
             }
@@ -373,6 +410,13 @@ impl ScopeApp {
 /// The settings of a line in short: "UART Auto 8N1", "UART 19200 7E1 inv",
 /// "I2C SCL: scl".
 fn summary(d: &LineDecoder) -> String {
+    if d.settings.protocol == Protocol::Spi {
+        return if d.clock.is_empty() {
+            "SPI, choose SCLK".to_owned()
+        } else {
+            format!("SPI mode {}, SCLK: {}", d.settings.spi.mode, d.clock)
+        };
+    }
     if d.settings.protocol == Protocol::I2c {
         return if d.clock.is_empty() {
             "I2C, choose SCL".to_owned()
@@ -430,6 +474,92 @@ fn threshold_setting(ui: &mut egui::Ui, threshold: &mut Option<f64>, used: Optio
             );
         }
     });
+}
+
+/// The SPI settings of data line `label` (trace `i`): clock, chip select,
+/// mode, bit order and word size. `lines`: the lines that can be chosen.
+fn spi_settings(
+    ui: &mut egui::Ui,
+    label: &str,
+    i: usize,
+    lines: &[(usize, String)],
+    d: &mut LineDecoder,
+) {
+    ui.label(format!("{label} is a data line (MOSI or MISO)."));
+    let others = || lines.iter().filter(move |(j, _)| *j != i);
+    egui::Grid::new(("spi_settings", label))
+        .num_columns(2)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            ui.label("Clock (SCLK):");
+            ui.horizontal_wrapped(|ui| {
+                for (j, name) in others() {
+                    ui.radio_value(
+                        &mut d.clock,
+                        name.clone(),
+                        RichText::new(name).color(palette::channel(*j)),
+                    );
+                }
+            });
+            ui.end_row();
+            ui.label("Chip select (CS):");
+            ui.horizontal_wrapped(|ui| {
+                ui.radio_value(&mut d.select, String::new(), "None")
+                    .on_hover_text("Without CS, a pause of the clock starts a new word");
+                for (j, name) in others().filter(|(_, n)| *n != d.clock) {
+                    ui.radio_value(
+                        &mut d.select,
+                        name.clone(),
+                        RichText::new(name).color(palette::channel(*j)),
+                    );
+                }
+            });
+            ui.end_row();
+            let s = &mut d.settings.spi;
+            if !d.select.is_empty() {
+                ui.label("CS active:");
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut s.cs_active_low, true, "Low");
+                    ui.radio_value(&mut s.cs_active_low, false, "High");
+                });
+                ui.end_row();
+            }
+            ui.label("Mode:");
+            ui.horizontal(|ui| {
+                for (m, tip) in [
+                    (0, "CPOL 0, CPHA 0: clock idle low, read on the rising edge"),
+                    (
+                        1,
+                        "CPOL 0, CPHA 1: clock idle low, read on the falling edge",
+                    ),
+                    (
+                        2,
+                        "CPOL 1, CPHA 0: clock idle high, read on the falling edge",
+                    ),
+                    (
+                        3,
+                        "CPOL 1, CPHA 1: clock idle high, read on the rising edge",
+                    ),
+                ] {
+                    ui.radio_value(&mut s.mode, m, m.to_string())
+                        .on_hover_text(tip);
+                }
+            });
+            ui.end_row();
+            ui.label("Bit order:");
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut s.msb_first, true, "MSB first");
+                ui.radio_value(&mut s.msb_first, false, "LSB first");
+            });
+            ui.end_row();
+            ui.label("Word size:");
+            ui.add(
+                egui::DragValue::new(&mut s.word_bits)
+                    .range(4..=16)
+                    .suffix(" bits"),
+            );
+            ui.end_row();
+        });
 }
 
 /// The UART settings of line `label`.
@@ -505,7 +635,8 @@ fn is_text(d: &Decoded) -> bool {
 }
 
 /// A frame as shown in the plot and in the row: the word in `radix`; for
-/// I2C, "S", "Sr" and "P" for start, repeated start and stop, "W 48" or
+/// I2C, "S", "Sr" and "P" for start, repeated start and stop; for SPI,
+/// "[" and "]" for CS active and released; "W 48" or
 /// "R 48" for an address (in hex when `radix` is ASCII), and "N" after a
 /// byte that was not acknowledged.
 pub(super) fn frame_text(f: &Frame, radix: Radix) -> String {
@@ -514,6 +645,8 @@ pub(super) fn frame_text(f: &Frame, radix: Radix) -> String {
         FrameKind::Start { repeated: false } => "S".to_owned(),
         FrameKind::Start { repeated: true } => "Sr".to_owned(),
         FrameKind::Stop => "P".to_owned(),
+        FrameKind::Select { active: true } => "[".to_owned(),
+        FrameKind::Select { active: false } => "]".to_owned(),
         FrameKind::Address { read } => {
             let radix = if radix == Radix::Ascii {
                 Radix::Hex
@@ -545,6 +678,8 @@ fn describe(f: &Frame) -> String {
         FrameKind::Start { repeated: false } => "start".to_owned(),
         FrameKind::Start { repeated: true } => "repeated start".to_owned(),
         FrameKind::Stop => "stop".to_owned(),
+        FrameKind::Select { active: true } => "CS active (start of a selection)".to_owned(),
+        FrameKind::Select { active: false } => "CS released".to_owned(),
         FrameKind::Address { read } => format!(
             "address {} (hex), {}",
             word_text(f.value, 7, Radix::Hex),
@@ -621,8 +756,8 @@ pub(super) fn draw_decode_lane(
         // I2C start and stop: a dot where the condition is (green for a
         // start, red for a stop), like a logic analyzer.
         let dot = match f.kind {
-            FrameKind::Start { .. } => Some((x0, START_COLOR)),
-            FrameKind::Stop => Some((x1, STOP_COLOR)),
+            FrameKind::Start { .. } | FrameKind::Select { active: true } => Some((x0, START_COLOR)),
+            FrameKind::Stop | FrameKind::Select { active: false } => Some((x1, STOP_COLOR)),
             _ => None,
         };
         if let Some((at, dot_color)) = dot {

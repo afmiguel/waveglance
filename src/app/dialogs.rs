@@ -400,6 +400,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
             "An analog channel is made into 0 and 1 with a threshold (in its ▸ settings): Auto (the middle of the signal, with hysteresis) or a value in volts.",
             "The words are drawn just above the decoded signal and listed in a row under the plot: Hex, Dec, Bin or ASCII. Click a word in the row to centre it; ⎘ Copy copies all of them. A word with a parity or framing error is in the warning colour.",
             "I2C: check the SDA line, and in its ▸ settings choose I2C and the SCL line (a line named sda gets I2C with scl by itself). S = start, Sr = repeated start, W/R = address and direction, N = not acknowledged (NACK), P = stop; green and red dots mark start and stop.",
+            "SPI: check the data line (MOSI or MISO, or both), and in its ▸ settings choose SPI, the SCLK line, the CS line (or None), the mode (0–3), the bit order and the word size. Lines named mosi/miso get SPI with sck and cs by themselves. [ and ] in the row: CS active and released. Without CS, a pause of the clock starts a new word.",
             "Use a time base that gives at least 4 samples per bit (10 or more is better); the row warns when there are fewer.",
         ],
     );

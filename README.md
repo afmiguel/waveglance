@@ -31,9 +31,9 @@ mode, time cursors T1 and T2, automatic measurements and the Math channel.*
 - **Search** for rising edges, falling edges or glitches in the whole record.
 - **Logic signals and buses** (VCD): one lane per signal, bus values in Hex,
   Dec, Bin or ASCII.
-- **Protocol decoders** (logic analyzer): **UART** and **I2C**, on VCD lines or
-  on analog channels; several lines at the same time, each with its own
-  settings. SPI can be added the same way.
+- **Protocol decoders** (logic analyzer): **UART**, **I2C** and **SPI**, on VCD
+  lines or on analog channels; several lines at the same time, each with its
+  own settings.
 - **Reference waveform**: a second file drawn faint behind the traces.
 - **Export** to CSV, **screenshot** (PNG) and **print**, with a white screen
   for paper.
@@ -160,7 +160,7 @@ is no room above it in the 8 divisions.*
   the warning colour. The row warns when there are fewer than 4 samples per
   bit.
 - The decoders are a module of their own (`src/decode/`, one file per
-  protocol), so that SPI can be added later.
+  protocol), so that more protocols can be added.
 
 ### Protocol decoder: I2C
 
@@ -181,6 +181,27 @@ repeated start; red dot: stop.*
 - The clock rate (SCL) is measured and shown in the row.
 - It works on two channels of an oscilloscope too (the DPOX180H has two):
   example "I2C on two analog channels", CH1 = SDA, CH2 = SCL.
+
+### Protocol decoder: SPI
+
+![SPI MOSI and MISO decoded from a flash memory read](docs/images/spi-decode.png)
+
+*VCD example "SPI: flash memory" (1 MHz, mode 0): MOSI sends the commands
+(0x9F JEDEC ID, 0x06 write enable, 0x03 read at 0x000100) and MISO answers
+(EF 40 18, then "Hello SPI" = 48 65 6C 6C 6F 20 53 50 49). Green and red dots:
+CS active and released.*
+
+- Check the data line (**MOSI** or **MISO**; check both to see both
+  directions). In its **▸** settings choose **SPI**, the **SCLK** line, the
+  **CS** line (or None), the **mode** (0–3: clock polarity and phase), the bit
+  order (MSB or LSB first) and the word size (4–16 bits). Lines named
+  `mosi`/`miso` get SPI with the lines named `sck`/`sclk` and `cs` by
+  themselves.
+- With CS, the words are counted from the start of each selection, shown as
+  `[` … `]` in the row; a word cut by CS is marked as incomplete.
+- Without CS (a two-channel oscilloscope: data and clock), a pause of the
+  clock longer than 3 clock periods starts a new word. Example "SPI on two
+  analog channels (no CS)".
 
 ### Other functions
 
@@ -228,7 +249,7 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 
 - Drop a file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
 - **File ▾ → Open example**: real FNIRSI DPOX180H and 1013D captures, Rigol captures, and VCD
-  files made for the viewer (a CPU bus, a DAC, three UART and two I2C examples).
+  files made for the viewer (a CPU bus, a DAC, and UART, I2C and SPI examples).
 - The welcome screen lists all the controls; **? Help** (F1) has the main
   instructions.
 - Keyboard: Ctrl/⌘+O open, Ctrl/⌘+P print, F1 help, F/H/V fit, Z zoom view,
@@ -266,7 +287,7 @@ this on each push to `main`.
 | `src/formats/` | One module per file format, detection (`probe`) and `open` |
 | `src/app/` | User interface: `mod.rs` (state), `menus`, `readouts`, `plot`, `input`, `dialogs`, `actions`, `format` |
 | `src/measure.rs`, `src/fft.rs`, `src/cursors.rs` | Measurements, spectrum, cursors (work on any trace) |
-| `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`, `i2c.rs`) |
+| `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`, `i2c.rs`, `spi.rs`) |
 | `src/export.rs`, `src/examples.rs`, `src/palette.rs` | CSV/PNG/print, built-in examples, colours |
 
 To add a file format: write a module in `src/formats/` that implements
@@ -399,7 +420,7 @@ The files in `assets/examples/rigol/` are Rigol captures (DHO1074 and MSO5000
 
 The files in `assets/examples/vcd/` are not captures: `scripts/make-vcd-examples.py`
 makes them (a CPU bus with write and read cycles, an 8-bit DAC with its analog
-output, three UART and two I2C examples). Run the script again to make the same files.
+output, and UART, I2C and SPI examples). Run the script again to make the same files.
 
 The images in `docs/images/` are screenshots of this viewer with the example
 files above.

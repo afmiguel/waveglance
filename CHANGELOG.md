@@ -5,6 +5,20 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.27.0 — 2026-11-08
+
+- **SPI decoder.** In Decode ▾, check the data line (MOSI or MISO, or both)
+  and, in its ▸ settings, choose SPI, the SCLK line, the CS line (or None),
+  the mode (0–3), the bit order and the word size (4–16 bits). Lines named
+  `mosi`/`miso` get SPI with `sck`/`sclk` and `cs` by themselves. CS active
+  and released are green and red dots (`[` and `]` in the row); a word cut
+  by CS is marked incomplete. Without CS, a pause of the clock starts a new
+  word, so a two-channel oscilloscope (data and clock) can decode SPI too.
+- New examples: **SPI: flash memory** (VCD, 1 MHz: JEDEC ID, write enable,
+  read "Hello SPI") and **SPI on two analog channels (no CS)**.
+- The word count of a decoded line counts only the data and address words
+  (not the start, stop and CS marks).
+
 ## 0.26.0 — 2026-11-08
 
 - **I2C decoder.** In Decode ▾, check the SDA line and, in its ▸ settings,

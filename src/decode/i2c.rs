@@ -326,6 +326,7 @@ pub(crate) mod tests {
                 FrameKind::Start { repeated: false } => "S".to_owned(),
                 FrameKind::Start { repeated: true } => "Sr".to_owned(),
                 FrameKind::Stop => "P".to_owned(),
+                FrameKind::Select { .. } => "CS".to_owned(),
                 FrameKind::Address { read } => format!(
                     "{}{:02X}{}",
                     if read { "R" } else { "W" },

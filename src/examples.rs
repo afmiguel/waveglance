@@ -213,6 +213,26 @@ pub const EXAMPLES: &[Example] = &[
         file: "example-vcd-i2c-analog.vcd",
         bytes: include_bytes!("../assets/examples/vcd/i2c-analog.vcd"),
     },
+    Example {
+        group: "Logic (VCD)",
+        label: "SPI: flash memory",
+        about: "SPI at 1 MHz, mode 0, with cs, sck, mosi and miso: read the JEDEC ID \
+                (0x9F, answer EF 40 18), write enable (0x06), and read 9 bytes \
+                (0x03 at 0x000100): \"Hello SPI\" on miso. In Decode ▾, check mosi \
+                and miso: they use SPI with sck and cs by themselves.",
+        file: "example-vcd-spi-flash.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/spi-flash.vcd"),
+    },
+    Example {
+        group: "Logic (VCD)",
+        label: "SPI on two analog channels (no CS)",
+        about: "SPI as a two-channel oscilloscope sees it: CH1 is MOSI, CH2 is SCLK, \
+                500 kHz, mode 0, no chip select. In Decode ▾, check CH1, then in its \
+                ▸ settings choose SPI and CH2 as SCLK: the words are found from the \
+                pauses of the clock.",
+        file: "example-vcd-spi-analog.vcd",
+        bytes: include_bytes!("../assets/examples/vcd/spi-analog.vcd"),
+    },
 ];
 
 #[cfg(test)]
@@ -241,7 +261,7 @@ mod tests {
             uart,
             ..Default::default()
         };
-        let d = crate::decode::decode(w.trace(label).unwrap(), None, &settings).unwrap();
+        let d = crate::decode::decode(w.trace(label).unwrap(), None, None, &settings).unwrap();
         assert!(d.warnings.is_empty(), "{:?}", d.warnings);
         d
     }
@@ -268,7 +288,8 @@ mod tests {
             protocol: crate::decode::Protocol::I2c,
             ..Default::default()
         };
-        let d = crate::decode::decode(w.trace(sda).unwrap(), w.trace(scl), &settings).unwrap();
+        let d =
+            crate::decode::decode(w.trace(sda).unwrap(), w.trace(scl), None, &settings).unwrap();
         assert!(d.warnings.is_empty(), "{:?}", d.warnings);
         assert!(d.frames.iter().all(|f| f.error.is_none()));
         assert!(d.title.contains("100.0 kHz"), "{}", d.title);
@@ -279,6 +300,7 @@ mod tests {
                 match f.kind {
                     FrameKind::Start { repeated } => if repeated { "Sr" } else { "S" }.to_owned(),
                     FrameKind::Stop => "P".to_owned(),
+                    FrameKind::Select { .. } => "CS".to_owned(),
                     FrameKind::Address { read } => {
                         format!("{}{:02X}{n}", if read { "R" } else { "W" }, f.value)
                     }
@@ -287,6 +309,48 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// The SPI data words of an example, in hex.
+    fn spi_words(file: &str, data: &str, clock: &str, cs: Option<&str>) -> Vec<u32> {
+        use crate::decode::{FrameKind, Protocol, Settings};
+        let e = EXAMPLES.iter().find(|e| e.file.contains(file)).unwrap();
+        let w = crate::formats::open(e.bytes).unwrap();
+        let settings = Settings {
+            protocol: Protocol::Spi,
+            ..Default::default()
+        };
+        let d = crate::decode::decode(
+            w.trace(data).unwrap(),
+            w.trace(clock),
+            cs.and_then(|c| w.trace(c)),
+            &settings,
+        )
+        .unwrap();
+        assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+        assert!(d.frames.iter().all(|f| f.error.is_none()), "{:?}", d.frames);
+        d.frames
+            .iter()
+            .filter(|f| f.kind == FrameKind::Data)
+            .map(|f| f.value)
+            .collect()
+    }
+
+    #[test]
+    fn spi_examples_decode() {
+        let mosi = spi_words("spi-flash", "mosi", "sck", Some("cs"));
+        assert_eq!(mosi[..6], [0x9F, 0, 0, 0, 0x06, 0x03]);
+        let miso = spi_words("spi-flash", "miso", "sck", Some("cs"));
+        assert_eq!(miso[1..4], [0xEF, 0x40, 0x18]);
+        let text: String = miso[9..]
+            .iter()
+            .map(|&v| char::from_u32(v).unwrap())
+            .collect();
+        assert_eq!(text, "Hello SPI");
+        assert_eq!(
+            spi_words("spi-analog", "CH1", "CH2", None),
+            [0x9F, 0x03, 0x00, 0x01, 0x00]
+        );
     }
 
     #[test]

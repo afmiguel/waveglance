@@ -13,5 +13,7 @@ example menu of the viewer. Run the script again to make the same files.
 | `uart-session.vcd` | Four serial lines: `host_tx` and `dev_tx` (AT commands and answers, 115200 8N1, then a break on `dev_tx`), `gps` (NMEA sentences, 9600 8N1) and `rs232` (inverted, 19200 7E1, one parity error). |
 | `i2c-sensor.vcd` | I2C at 100 kHz (`sda`, `scl`): write a register of a sensor at 0x48, read the temperature with a repeated start (0x19 0x80, the last byte with a NACK), and an address nobody answers (0x50). |
 | `i2c-analog.vcd` | The temperature read of `i2c-sensor.vcd` as an oscilloscope sees it: `CH1` (SDA) and `CH2` (SCL) in volts, 3.3 V open-drain lines with slow rising edges and noise. |
+| `spi-flash.vcd` | SPI at 1 MHz, mode 0 (`cs`, `sck`, `mosi`, `miso`): a flash memory answers the JEDEC ID (0x9F → EF 40 18), a write enable (0x06), and a read of 9 bytes at 0x000100 (`Hello SPI`). |
+| `spi-analog.vcd` | SPI without CS as a two-channel oscilloscope sees it: `CH1` (MOSI) and `CH2` (SCLK) in volts, 500 kHz, mode 0: 0x9F, a pause, then 0x03 0x00 0x01 0x00. |
 
 They are part of this project, under the same terms as its source code.
