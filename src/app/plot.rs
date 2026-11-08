@@ -337,6 +337,9 @@ impl ScopeApp {
             .zip(&spectrum.vrms)
             .map(|(&f, &v)| [f, level(v)])
             .collect();
+        // Bars: every bin (drawn after the plot, only the part in view).
+        let bars = self.fft.bars.then(|| points.clone());
+        let bars_mode = bars.is_some();
         let points = decimate(&points, FFT_BUCKETS);
         // Start view: up to the 20th harmonic of the peak (the whole span up
         // to half the sample rate is often far wider than the signal).
@@ -373,7 +376,7 @@ impl ScopeApp {
             plot.y_axis_label("V RMS")
                 .y_axis_formatter(|mark, _| si(mark.value, "V"))
         };
-        plot.show(ui, |plot| {
+        let response = plot.show(ui, |plot| {
             // Mouse wheel zooms, like the time plot.
             let (delta, modifiers) = plot.ctx().input(|i| (wheel_delta(i), i.modifiers));
             let amount = zoom_amount(delta, modifiers);
@@ -388,7 +391,18 @@ impl ScopeApp {
                 };
                 plot.zoom_bounds_around_hovered(factor);
             }
-            plot.line(Line::new("FFT", points).color(color).width(1.2));
+            if bars_mode {
+                // The line is kept for the hover label and the bounds, but
+                // not drawn: alpha 1 (fully transparent means "automatic
+                // colour" to egui_plot) and no width.
+                plot.line(
+                    Line::new("FFT", points)
+                        .color(Color32::from_rgba_premultiplied(0, 0, 0, 1))
+                        .width(0.0),
+                );
+            } else {
+                plot.line(Line::new("FFT", points).color(color).width(1.2));
+            }
             if let Some((pf, pv)) = peak {
                 plot.points(
                     egui_plot::Points::new("", vec![[pf, level(pv)]])
@@ -397,6 +411,10 @@ impl ScopeApp {
                 );
             }
         });
+        if let Some(all) = bars {
+            // dB: from the bottom of the plot; V RMS: from 0 V.
+            draw_fft_bars(ui, &response.transform, &all, !db, color);
+        }
     }
 
     pub(super) fn scope_screen(&mut self, ui: &mut egui::Ui) {
@@ -1246,5 +1264,82 @@ pub(super) fn draw_bus_lanes(
                 painter.galley(pos, galley, color);
             }
         }
+    }
+}
+
+/// The FFT as bars: one bar per frequency bin of `points` (`[f, level]`),
+/// from the bottom of the plot (or from level 0 when `from_zero`) up to its
+/// level. When the bins are closer than 4 points on the screen, each screen
+/// column gets one bar, at the highest level of its bins.
+pub(super) fn draw_fft_bars(
+    ui: &egui::Ui,
+    transform: &PlotTransform,
+    points: &[[f64; 2]],
+    from_zero: bool,
+    color: Color32,
+) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame);
+    let view = transform.bounds().range_x();
+    let a = points
+        .partition_point(|p| p[0] < *view.start())
+        .saturating_sub(1);
+    let b = (points.partition_point(|p| p[0] <= *view.end()) + 1).min(points.len());
+    let shown = &points[a..b.max(a)];
+    let base = if from_zero {
+        transform
+            .position_from_point_y(0.0)
+            .clamp(frame.top(), frame.bottom())
+    } else {
+        frame.bottom()
+    };
+    let x = |f: f64| transform.position_from_point_x(f);
+    // Top of a bar on the screen; `None` for a level not drawn (−∞ dB).
+    let top = |v: f64| {
+        v.is_finite()
+            .then(|| transform.position_from_point_y(v).max(frame.top()))
+    };
+    let fill = color.gamma_multiply(0.85);
+    let step = shown
+        .windows(2)
+        .map(|w| (x(w[1][0]) - x(w[0][0])).abs())
+        .next()
+        .unwrap_or(f32::INFINITY);
+    if step >= 4.0 {
+        // Bars with a gap of at least 1 point between them.
+        let half = (step * 0.7).min(step - 1.0) / 2.0;
+        for p in shown {
+            let (Some(y), cx) = (top(p[1]), x(p[0])) else {
+                continue;
+            };
+            let rect = egui::Rect::from_min_max(
+                egui::pos2(cx - half, y.min(base)),
+                egui::pos2(cx + half, y.max(base)),
+            );
+            painter.rect_filled(rect, 0.0, fill);
+        }
+        return;
+    }
+    // Bins closer than the bars: one bar per screen column.
+    let stroke = egui::Stroke::new(1.0, fill);
+    let mut column: Option<(i32, f32)> = None;
+    let draw = |c: i32, y: f32| {
+        let cx = c as f32 + 0.5;
+        painter.line_segment([egui::pos2(cx, y), egui::pos2(cx, base)], stroke);
+    };
+    for p in shown {
+        let Some(y) = top(p[1]) else { continue };
+        let c = x(p[0]).floor() as i32;
+        column = match column {
+            Some((col, best)) if col == c => Some((col, best.min(y))),
+            Some((col, best)) => {
+                draw(col, best);
+                Some((c, y))
+            }
+            None => Some((c, y)),
+        };
+    }
+    if let Some((col, best)) = column {
+        draw(col, best);
     }
 }

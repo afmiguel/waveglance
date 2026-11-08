@@ -5,6 +5,14 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.18.0 — 2026-11-08
+
+- **FFT as bars**: FFT ▾ → Draw → **Bars** shows one bar per frequency bin,
+  like a spectrum analyzer (from the bottom of the plot in dBV, from 0 V in
+  V RMS). When the bins are closer than 4 screen points, each screen column
+  gets one bar, at the highest level of its bins. The choice is kept for the
+  next session; Line is still the default.
+
 ## 0.17.0 — 2026-11-08
 
 - **VCD examples** (File ▾ → Open example → Logic (VCD)), made for the

@@ -581,6 +581,14 @@ impl ScopeApp {
                 .on_hover_text("Decibels relative to 1 V RMS");
             ui.radio_value(&mut self.fft.db, false, "V RMS");
         });
+        ui.label("Draw:");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.fft.bars, false, "Line")
+                .on_hover_text("A line through the levels of the frequency bins");
+            ui.radio_value(&mut self.fft.bars, true, "Bars").on_hover_text(
+                "One bar per frequency bin, like a spectrum analyzer. Zoomed out, the bins in one screen column make one bar (the highest level)",
+            );
+        });
         ui.separator();
         ui.label(
             RichText::new("The FFT uses the samples shown in the time plot.")

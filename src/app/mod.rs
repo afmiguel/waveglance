@@ -286,6 +286,8 @@ pub struct FftSettings {
     pub window: fft::Window,
     /// Level in dBV (true) or in volts RMS (false).
     pub db: bool,
+    /// Draw one bar per frequency bin (true) or a line (false).
+    pub bars: bool,
 }
 
 impl Default for FftSettings {
@@ -295,6 +297,7 @@ impl Default for FftSettings {
             source: 0,
             window: fft::Window::Hanning,
             db: true,
+            bars: false,
         }
     }
 }
