@@ -210,6 +210,10 @@ pub struct Decoded {
     pub warnings: Vec<String>,
     /// The threshold used (in the unit of the trace).
     pub threshold: f64,
+    /// The highest and lowest samples of the trace (the words are drawn
+    /// above or below them).
+    pub high: f64,
+    pub low: f64,
 }
 
 /// Decode `trace` with `settings`. `None` when the protocol is Off or the
@@ -222,6 +226,14 @@ pub fn decode(trace: &Trace, settings: &Settings) -> Option<Decoded> {
         Protocol::Uart => uart::decode(&logic, &settings.uart),
     };
     out.threshold = level;
+    (out.low, out.high) = trace
+        .points()
+        .iter()
+        .map(|p| p[1])
+        .filter(|v| v.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        });
     Some(out)
 }
 

@@ -501,9 +501,9 @@ impl ScopeApp {
             .bus_hover(ui.ctx(), &maps)
             .or_else(|| self.decode_hover(ui.ctx()));
         // The decoder lane: its corners keep it in the automatic bounds.
-        let decode_corners: Vec<[f64; 2]> = match (self.decode_map(), record_span.as_ref()) {
-            (Some(m), Some(span)) => {
-                let (lo, hi) = (m.to_plot(0.0), m.to_plot(1.0));
+        let decode_corners: Vec<[f64; 2]> = match (self.decode_band(), record_span.as_ref()) {
+            (Some((near, far)), Some(span)) => {
+                let (lo, hi) = (near.min(far), near.max(far));
                 let (a, b) = (*span.start(), *span.end());
                 vec![[a, lo], [a, hi], [b, hi], [b, lo]]
             }
@@ -795,20 +795,30 @@ impl ScopeApp {
             &maps,
             self.bus_radix,
         );
-        draw_lane_labels(ui, &response.transform, self.traces(), &maps);
-        if let (Some(d), Some(map), Some(source)) =
-            (self.decoded(), self.decode_map(), self.decode_source())
+        // A decoded digital line: its name goes above its words.
+        let decoded_digital = (self.decode_lanes() > 0)
+            .then(|| self.decode_source())
+            .flatten();
+        draw_lane_labels(
+            ui,
+            &response.transform,
+            self.traces(),
+            &maps,
+            decoded_digital,
+        );
+        if let (Some(d), Some(band), Some(source)) =
+            (self.decoded(), self.decode_band(), self.decode_source())
         {
             let label = format!(
-                "{} {}",
-                self.decode.protocol.label(),
-                self.traces()[source].label
+                "{} · {}",
+                self.traces()[source].label,
+                self.decode.protocol.label()
             );
             draw_decode_lane(
                 ui,
                 &response.transform,
                 &d,
-                map,
+                band,
                 self.decode_radix,
                 palette::channel(source),
                 &label,
@@ -1181,11 +1191,12 @@ pub(super) fn draw_lane_labels(
     transform: &PlotTransform,
     traces: &[Trace],
     maps: &[Option<YMap>],
+    skip: Option<usize>,
 ) {
     let frame = *transform.frame();
     let painter = ui.painter_at(frame);
     for (i, (t, map)) in traces.iter().zip(maps).enumerate() {
-        let Some(map) = map.filter(|_| t.is_digital()) else {
+        let Some(map) = map.filter(|_| t.is_digital() && skip != Some(i)) else {
             continue;
         };
         let y = transform.position_from_point_y(map.to_plot(1.0)) - 2.0;

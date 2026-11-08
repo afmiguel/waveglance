@@ -5,6 +5,16 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.23.0 — 2026-11-08
+
+- **Decoded words on the signal**, like a logic analyzer (Saleae): the UART
+  words are now drawn in a small band just above the decoded line, not in a
+  lane of their own at the bottom. The band has a fixed height on the screen
+  (22 points) and a larger font, so it does not grow when you zoom. A
+  decoded VCD line gets half a lane of room above it; on an analog channel,
+  the band is above the highest sample (in Div mode, under the lowest sample
+  when there is no room above in the 8 divisions).
+
 ## 0.22.0 — 2026-11-08
 
 - New example **UART: complete session (4 lines)** (File ▾ → Open example →

@@ -1,5 +1,5 @@
-//! The protocol decoder in the app: its lane under the traces, its menu
-//! and the row of decoded words.
+//! The protocol decoder in the app: the words drawn just above the decoded
+//! signal (like a logic analyzer), its menu and the row of decoded words.
 
 use super::*;
 use crate::decode::{self, Decoded, Protocol, uart};
@@ -25,9 +25,13 @@ impl ScopeApp {
         }
     }
 
-    /// Lanes used by the decoder (0 or 1), under the digital lanes.
+    /// 1 when the decoder decodes a digital trace (its words need room
+    /// above the signal, `DECODE_ROOM` lanes), else 0.
     pub(super) fn decode_lanes(&self) -> usize {
-        usize::from(self.decode_source().is_some())
+        usize::from(
+            self.decode_source()
+                .is_some_and(|i| self.traces()[i].is_digital()),
+        )
     }
 
     /// The decode result for the current file and settings (kept until
@@ -47,21 +51,59 @@ impl ScopeApp {
         d
     }
 
-    /// The lane of the decoder: the bottom lane.
-    pub(super) fn decode_map(&self) -> Option<YMap> {
-        (self.decode_lanes() > 0).then(|| self.lane_map(0, self.total_lanes()))
+    /// The room for the decoded words, in plot units: (near, far), `near`
+    /// on the side of the signal. The words are drawn from `near`, with a
+    /// fixed height on the screen. Just above the signal. A digital line: in the lane kept free above it. An
+    /// analog channel: above its highest sample (in Div mode, below its
+    /// lowest sample when there is no room above in the 8 divisions).
+    /// `None` if the trace is hidden.
+    pub(super) fn decode_band(&self) -> Option<(f64, f64)> {
+        let source = self.decode_source()?;
+        let map = self.y_maps().get(source).copied().flatten()?;
+        let trace = &self.traces()[source];
+        if trace.is_digital() {
+            // One lane of room: from just above the high level.
+            let lanes = self.total_lanes().max(2.0);
+            let pitch = self.lane_map(1.0, lanes).offset - self.lane_map(0.0, lanes).offset;
+            let top = map.to_plot(1.0);
+            // The gap between lanes (0.3) and the room kept above the line.
+            return Some((top + 0.06 * pitch, top + (0.3 + DECODE_ROOM - 0.04) * pitch));
+        }
+        let d = self.decoded()?;
+        if !d.high.is_finite() {
+            return None;
+        }
+        let top = map.to_plot(d.high);
+        Some(match self.y_axis {
+            YAxis::Divisions => {
+                let edge = SCREEN_DIVS_Y / 2.0;
+                let above = (top + 0.15, top + 0.75);
+                let bottom = map.to_plot(d.low);
+                let below = (bottom - 0.15, bottom - 0.75);
+                if above.1 > edge && below.1 >= -edge {
+                    below
+                } else {
+                    above
+                }
+            }
+            YAxis::Volts => {
+                let (lo, hi) = self.analog_span.unwrap_or((0.0, 1.0));
+                let span = if hi > lo { hi - lo } else { 1.0 };
+                (top + 0.03 * span, top + 0.2 * span)
+            }
+        })
     }
 
     /// The decoded word under the pointer, for the hover label.
     pub(super) fn decode_hover(&self, ctx: &egui::Context) -> Option<String> {
         let transform = self.last_transform.as_ref()?;
-        let map = self.decode_map()?;
+        let band = self.decode_band()?;
         let pos = ctx.input(|i| i.pointer.latest_pos())?;
-        let at = transform.value_from_position(pos);
-        let (lo, hi) = (map.to_plot(0.0), map.to_plot(1.0));
-        if !(lo.min(hi)..=lo.max(hi)).contains(&at.y) {
+        let (near, far) = band_pixels(transform, band);
+        if !(near.min(far)..=near.max(far)).contains(&pos.y) {
             return None;
         }
+        let at = transform.value_from_position(pos);
         let d = self.decoded()?;
         let i = d.frames.partition_point(|f| f.end < at.x);
         let f = d.frames.get(i).filter(|f| f.start <= at.x)?;
@@ -161,7 +203,7 @@ impl ScopeApp {
         ui.separator();
         ui.label(
             RichText::new(
-                "The words are drawn in a lane under the traces and listed under the plot. \
+                "The words are drawn just above the signal and listed under the plot. \
                  Click a word in the list to show it.",
             )
             .small()
@@ -322,14 +364,26 @@ fn words_text(d: &Decoded, radix: Radix) -> String {
     }
 }
 
-/// The decoded words in the decoder lane: a hexagon per word with its text
-/// when it fits; a filled band where the words are too close; a warning
-/// colour for a word with an error.
+/// Height of the words on the screen, in points.
+const WORD_HEIGHT: f32 = 22.0;
+
+/// The screen y of the words (near, far): from the side of the signal,
+/// `WORD_HEIGHT` points (less if the room is smaller).
+fn band_pixels(transform: &PlotTransform, band: (f64, f64)) -> (f32, f32) {
+    let near = transform.position_from_point_y(band.0);
+    let far = transform.position_from_point_y(band.1);
+    let h = (far - near).abs().min(WORD_HEIGHT);
+    (near, near + h * (far - near).signum())
+}
+
+/// The decoded words in their band above the signal: a hexagon per word
+/// with its text when it fits; a filled band where the words are too close;
+/// a warning colour for a word with an error.
 pub(super) fn draw_decode_lane(
     ui: &egui::Ui,
     transform: &PlotTransform,
     d: &Decoded,
-    map: YMap,
+    band: (f64, f64),
     radix: Radix,
     color: Color32,
     label: &str,
@@ -337,8 +391,8 @@ pub(super) fn draw_decode_lane(
     let frame = *transform.frame();
     let painter = ui.painter_at(frame);
     let view = transform.bounds().range_x();
-    let top = transform.position_from_point_y(map.to_plot(1.0));
-    let bottom = transform.position_from_point_y(map.to_plot(0.0));
+    let (near, far) = band_pixels(transform, band);
+    let (top, bottom) = (near.min(far), near.max(far));
     let mid = (top + bottom) / 2.0;
     let stroke = egui::Stroke::new(1.5, color);
     let slant = ((bottom - top) / 4.0).clamp(1.0, 4.0);
@@ -347,15 +401,7 @@ pub(super) fn draw_decode_lane(
             .position_from_point_x(t)
             .clamp(frame.left() - 20.0, frame.right() + 20.0)
     };
-    // The idle line.
-    painter.line_segment(
-        [
-            egui::pos2(frame.left(), mid),
-            egui::pos2(frame.right(), mid),
-        ],
-        egui::Stroke::new(1.0, color.gamma_multiply(0.5)),
-    );
-    let font = egui::FontId::monospace(11.0);
+    let font = egui::FontId::monospace(((bottom - top) * 0.62).clamp(9.0, 14.0));
     let first = d.frames.partition_point(|f| f.end < *view.start());
     let mut busy: Option<(f32, f32)> = None;
     let flush = |busy: &mut Option<(f32, f32)>| {
@@ -402,9 +448,15 @@ pub(super) fn draw_decode_lane(
         }
     }
     flush(&mut busy);
+    // The name on the far side of the words (away from the signal).
+    let (y, align) = if far < near {
+        (top - 2.0, egui::Align2::LEFT_BOTTOM)
+    } else {
+        (bottom + 2.0, egui::Align2::LEFT_TOP)
+    };
     painter.text(
-        egui::pos2(frame.left() + 4.0, top - 2.0),
-        egui::Align2::LEFT_BOTTOM,
+        egui::pos2(frame.left() + 4.0, y),
+        align,
         label,
         egui::FontId::monospace(10.0),
         color,

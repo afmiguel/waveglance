@@ -128,14 +128,16 @@ and `data[7:0]` in hex. X marks a bus value with unknown bits (x or z).*
 ![UART answers decoded as ASCII from a VCD file with four serial lines](docs/images/uart-decode.png)
 
 *VCD example "UART: complete session (4 lines)", Decode → UART on `dev_tx`
-(115200 baud, 8N1): each byte in a lane, and the whole text under the plot.
-The last word is a break (a framing error, in the warning colour).*
+(115200 baud, 8N1): each byte just above the signal, like a logic analyzer,
+and the whole text under the plot. The last word of the row is a break (a
+framing error, in the warning colour).*
 
 ![A noisy 3.3 V serial line decoded with an automatic threshold](docs/images/uart-analog.png)
 
 *VCD example "UART on an analog line": a 3.3 V line with slow edges and noise,
 as an oscilloscope sees it. The baud rate (9600) and the threshold (1.65 V)
-are found automatically.*
+are found automatically. In Div mode the words go under the signal when there
+is no room above it in the 8 divisions.*
 
 **⇄ Decode ▾** makes a serial line into bytes:
 
@@ -145,8 +147,9 @@ are found automatically.*
 - The data line is a channel of the oscilloscope or a VCD signal. An analog
   channel is made into 0 and 1 with a threshold: automatic (the middle of the
   signal, with hysteresis) or a value in volts.
-- The words are drawn in a lane under the traces and listed in a row under the
-  plot in Hex, Dec, Bin or ASCII. A click on a word centres it in the plot;
+- The words are drawn just above the decoded signal (a small band, 22 points
+  high, that keeps its size when you zoom), and listed in a row under the plot
+  in Hex, Dec, Bin or ASCII. A click on a word centres it in the plot;
   **⎘ Copy** copies all of them. Words with a parity or framing error are in
   the warning colour. The row warns when there are fewer than 4 samples per
   bit.

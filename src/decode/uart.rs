@@ -140,6 +140,8 @@ pub fn decode(logic: &Logic, s: &Settings) -> Decoded {
             frames: Vec::new(),
             warnings,
             threshold: 0.0,
+            high: 0.0,
+            low: 0.0,
         };
     };
     let bit = 1.0 / baud;
@@ -215,6 +217,8 @@ pub fn decode(logic: &Logic, s: &Settings) -> Decoded {
         frames,
         warnings,
         threshold: 0.0,
+        high: 0.0,
+        low: 0.0,
     }
 }
 

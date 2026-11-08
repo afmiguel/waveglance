@@ -48,6 +48,8 @@ const MATH_KEY: &str = "math";
 const CURSOR_MODE_KEY: &str = "cursor_mode";
 /// Storage key of the way bus values are written (hex, dec, bin).
 const BUS_RADIX_KEY: &str = "bus_radix";
+/// Room (in lanes) above a decoded digital line, for its words.
+const DECODE_ROOM: f64 = 0.5;
 /// Storage keys of the protocol decoder settings and of how it writes the words.
 const DECODE_KEY: &str = "decode";
 const DECODE_RADIX_KEY: &str = "decode_radix";
@@ -652,14 +654,14 @@ impl ScopeApp {
     /// Vertical mapping of each trace for the current Y axis mode
     /// (`None` if the trace is hidden). One entry per trace.
     /// All the lanes: one per digital trace, plus the decoder lane.
-    pub(super) fn total_lanes(&self) -> usize {
-        self.traces().iter().filter(|t| t.is_digital()).count() + self.decode_lanes()
+    pub(super) fn total_lanes(&self) -> f64 {
+        self.traces().iter().filter(|t| t.is_digital()).count() as f64
+            + DECODE_ROOM * self.decode_lanes() as f64
     }
 
     /// The mapping of lane `k` of `lanes` (lane 0 at the bottom). Lane
     /// height: 1 division (Div), or 15% of the analog range (Volts).
-    pub(super) fn lane_map(&self, k: usize, lanes: usize) -> YMap {
-        let k = k as f64;
+    pub(super) fn lane_map(&self, k: f64, lanes: f64) -> YMap {
         let (lo, hi) = self.analog_span.unwrap_or((0.0, 0.0));
         let volts_lane = if hi > lo { (hi - lo) * 0.15 } else { 1.0 };
         match self.y_axis {
@@ -670,25 +672,31 @@ impl ScopeApp {
             YAxis::Volts => YMap {
                 scale: volts_lane * 0.7,
                 // The top lane just under the analog range.
-                offset: lo - (lanes as f64 - k + 0.2) * volts_lane,
+                offset: lo - (lanes - k + 0.2) * volts_lane,
             },
         }
     }
 
     pub fn y_maps(&self) -> Vec<Option<YMap>> {
-        // Digital traces: one lane each, under the analog traces; the
-        // decoder lane (if any) is the bottom one.
+        // Digital traces: one lane each, under the analog traces. A digital
+        // trace that is decoded has free room above it, for the words.
         let traces = self.traces();
         let lanes = self.total_lanes();
-        let mut lane = 0usize;
+        let decoded = (self.decode_lanes() > 0)
+            .then(|| self.decode_source())
+            .flatten();
+        let mut lane = 0.0;
         traces
             .iter()
             .enumerate()
             .map(|(i, t)| {
                 if t.is_digital() {
                     // Top lane first: the first digital trace is the highest.
-                    let k = lanes - 1 - lane;
-                    lane += 1;
+                    if decoded == Some(i) {
+                        lane += DECODE_ROOM;
+                    }
+                    let k = lanes - 1.0 - lane;
+                    lane += 1.0;
                     if !self.visible.get(i).copied().unwrap_or(true) {
                         return None;
                     }
@@ -719,7 +727,7 @@ impl ScopeApp {
     pub(super) fn lane_zone_top(&self) -> Option<f64> {
         let traces = self.traces();
         let digital = traces.iter().filter(|t| t.is_digital()).count();
-        if self.total_lanes() == 0 {
+        if self.total_lanes() == 0.0 {
             return None;
         }
         if digital == traces.len() {
