@@ -181,12 +181,17 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         let label = r.text(16)?;
         // Skip the rest of the header (time tag, segment, extensions). The
         // header size must cover the fields just read, and stay in the file.
-        if header_size < r.at - start || start + header_size > bytes.len() {
-            return Err(ReadError(format!(
-                "Keysight .bin: waveform header size {header_size} at byte {start} is not valid"
-            )));
-        }
-        r.at = start + header_size;
+        // checked_add: on 32-bit targets (WebAssembly) a huge size could
+        // wrap around.
+        let header_end = start
+            .checked_add(header_size)
+            .filter(|&end| header_size >= r.at - start && end <= bytes.len())
+            .ok_or_else(|| {
+                ReadError(format!(
+                    "Keysight .bin: waveform header size {header_size} at byte {start} is not valid"
+                ))
+            })?;
+        r.at = header_end;
         if !(x_increment.is_finite() && x_increment > 0.0) || !x_origin.is_finite() {
             return Err(ReadError(format!(
                 "Keysight .bin: {label}: time step {x_increment} or origin {x_origin} is not valid"

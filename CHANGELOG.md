@@ -5,6 +5,19 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.31.1 — 2026-11-09
+
+Small fixes from the second pass of the independent review.
+
+- Keysight / Rigol `.bin`: the end of a waveform header is computed with
+  an overflow check, so a damaged header size is refused in the same way on
+  64-bit desktops and in the 32-bit web version.
+- VCD: the limit of value changes is now exact; a file one change over the
+  limit is refused, also when that change is the last line of the file.
+- Robustness tests: each case runs on its own thread with a time limit, so a
+  reader that never ends fails the test instead of stopping the run.
+- GitHub Actions: every job has a time limit (`timeout-minutes`).
+
 ## 0.31.0 — 2026-11-09
 
 Fixes from an independent review of the project:

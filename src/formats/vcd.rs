@@ -134,6 +134,11 @@ pub const MAX_VARS: usize = 4096;
 pub const MAX_CHANGES: usize = 20_000_000;
 
 pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
+    read_limited(bytes, MAX_CHANGES)
+}
+
+/// [`read`] with a given limit of value changes (the tests use a small one).
+fn read_limited(bytes: &[u8], max_changes: usize) -> Result<Capture, ReadError> {
     let text = String::from_utf8_lossy(bytes);
     let mut tokens = text.split_whitespace().peekable();
     let mut vars: Vec<Var> = Vec::new();
@@ -217,10 +222,11 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
     let mut now: u64 = 0;
     let mut end: u64 = 0;
     let mut total_changes = 0usize;
+    let mut too_many = false;
     while let Some(tok) = tokens.next() {
-        if total_changes > MAX_CHANGES {
+        if too_many {
             return Err(ReadError(format!(
-                "VCD: more than {MAX_CHANGES} value changes; cut the record shorter"
+                "VCD: more than {max_changes} value changes; cut the record shorter"
             )));
         }
         let mut set = |id: &str, v: f64, now: u64| {
@@ -240,6 +246,10 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
                 // A digital value that does not change is not a change.
                 let same = |a: f64| a == v || (a.is_nan() && v.is_nan());
                 if !var.real && ch.last().is_some_and(|c| same(c.1)) {
+                    return;
+                }
+                if total_changes >= max_changes {
+                    too_many = true;
                     return;
                 }
                 ch.push((now, v));
@@ -267,6 +277,11 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
             }
             _ => {}
         }
+    }
+    if too_many {
+        return Err(ReadError(format!(
+            "VCD: more than {max_changes} value changes; cut the record shorter"
+        )));
     }
 
     let mut traces = Vec::new();
@@ -469,5 +484,21 @@ $enddefinitions $end
         assert!(read(b"$timescale 1ns $end $enddefinitions $end").is_err());
         assert_eq!(timescale("100 ps"), Some(1e-10));
         assert_eq!(timescale("1us"), Some(1e-6));
+    }
+
+    #[test]
+    fn change_limit_is_exact() {
+        // Changes of a real variable at distinct times; the last change is
+        // the last token of the file.
+        let file = |n: usize| {
+            let mut v =
+                String::from("$timescale 1 ns $end\n$var real 64 r v $end\n$enddefinitions $end\n");
+            for k in 0..n {
+                v.push_str(&format!("#{k}\nr{k}.5 r\n"));
+            }
+            v
+        };
+        assert!(read_limited(file(5).as_bytes(), 5).is_ok());
+        assert!(read_limited(file(6).as_bytes(), 5).is_err());
     }
 }

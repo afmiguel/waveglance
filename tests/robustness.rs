@@ -4,10 +4,12 @@
 //! The inputs are the built-in examples (every format), cut at many lengths,
 //! with random bytes changed, plus random bytes and a few hand-made damaged
 //! headers. The random numbers come from a fixed seed, so a failure can be
-//! reproduced.
+//! reproduced. Each case runs on its own thread with a time limit, so an
+//! endless loop fails the test instead of stopping the run.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use waveglance::{examples, formats};
 
 /// A small, deterministic random generator (xorshift64*).
@@ -26,16 +28,27 @@ impl Rng {
 }
 
 /// Open `bytes` (format detection, then reading) and fail the test if a
-/// reader panics or takes more than `limit`.
+/// reader panics or does not finish within `limit`.
+///
+/// The reader runs on its own thread, so a reader that never ends (an
+/// endless loop) also fails the test: the test stops waiting after
+/// `limit`, and the test program ends with the thread still running.
 fn must_not_crash(what: &str, bytes: &[u8], limit: Duration) {
-    let start = Instant::now();
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let _ = formats::detect(bytes);
-        let _ = formats::open(bytes);
-    }));
-    assert!(result.is_ok(), "a reader panicked on {what}");
-    let took = start.elapsed();
-    assert!(took < limit, "{what} took {took:?}");
+    let bytes = bytes.to_vec();
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = formats::detect(&bytes);
+        let _ = formats::open(&bytes);
+        let _ = done.send(());
+    });
+    match finished.recv_timeout(limit) {
+        Ok(()) => {}
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            panic!("{what} did not finish in {limit:?}")
+        }
+        // The thread ended without sending: the reader panicked.
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("a reader panicked on {what}"),
+    }
 }
 
 #[test]

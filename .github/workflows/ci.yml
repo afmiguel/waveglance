@@ -19,6 +19,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    # A safety net: a reader that never ends must not hold the job for hours.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -56,6 +58,7 @@ jobs:
 
   audit:
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
