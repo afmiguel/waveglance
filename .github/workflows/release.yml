@@ -1,0 +1,115 @@
+# Build the desktop programs for macOS, Windows and Linux when a version tag
+# (vX.Y.Z) is pushed, and publish them in a GitHub Release with the notes of
+# that version from CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: macos-apple-silicon
+          - os: macos-14
+            target: x86_64-apple-darwin
+            name: macos-intel
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup default stable
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libssl-dev libgtk-3-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin waveglance-desktop
+
+      - name: Package
+        shell: bash
+        run: |
+          dir="waveglance-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$dir"
+          exe=""
+          if [ "${{ runner.os }}" = "Windows" ]; then exe=".exe"; fi
+          cp "target/${{ matrix.target }}/release/waveglance-desktop$exe" "$dir/waveglance$exe"
+          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+          else
+            zip -qr "$dir.zip" "$dir"
+          fi
+          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The section of this version: from its "## X.Y.Z" line to the next "## ".
+          awk -v v="$version" '
+            $0 ~ "^## " v " " { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ---
+          **Use it in the browser, with no installation:** https://afmiguel.github.io/waveglance/
+
+          **Desktop programs** (below): unzip and run `waveglance`. They are not
+          signed: on macOS, right-click the program and choose Open the first
+          time (or run `xattr -d com.apple.quarantine waveglance`); on Windows,
+          choose "More info" → "Run anyway" if SmartScreen asks.
+          EOF
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: WaveGlance ${{ github.ref_name }}
+          body_path: notes.md
+          files: assets/*.zip

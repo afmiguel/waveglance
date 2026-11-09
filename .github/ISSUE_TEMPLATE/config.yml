@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Try WaveGlance in the browser
+    url: https://afmiguel.github.io/waveglance/
+    about: No installation. Drop a file, or open one of the built-in examples.

@@ -9,10 +9,13 @@ web browser (WebAssembly), with no installation:
 *WaveGlance was called fnirsi-viewer up to version 0.27: it started as a
 viewer for FNIRSI files only.*
 
-![Two channels of a FNIRSI 1013D in Div mode, with time cursors, measurements and the Math channel CH1 − CH2](docs/images/two-channels-math.png)
+![WaveGlance: files of several instruments, measurements, FFT, logic signals and UART, I2C and SPI decoders](docs/images/demo.gif)
 
-*FNIRSI 1013D file (example "500 kHz on two channels"): two channels in Div
-mode, time cursors T1 and T2, automatic measurements and the Math channel.*
+**Try it now:** open <https://afmiguel.github.io/waveglance/> and click one of
+the examples on the welcome screen, or one of the [links below](#examples).
+The files you open are read in your browser: nothing is uploaded.
+**Desktop programs** for macOS, Windows and Linux are on the
+[Releases](https://github.com/afmiguel/waveglance/releases) page.
 
 ## Features
 
@@ -209,6 +212,11 @@ CS active and released.*
 
 ### Other functions
 
+![Two channels of a FNIRSI 1013D in Div mode, with time cursors, measurements and the Math channel CH1 − CH2](docs/images/two-channels-math.png)
+
+*FNIRSI 1013D file (example "500 kHz on two channels"): two channels in Div
+mode, time cursors T1 and T2, automatic measurements and the Math channel.*
+
 - **Σ Math ▾**: CH1 + CH2 or CH1 − CH2 (sample by sample, in volts), drawn
   and measured like a channel (MATH row).
 - **⌕ Search ▾**: rising edges, falling edges or glitches in the whole record
@@ -229,6 +237,37 @@ CS active and released.*
   already includes the probe setting).
 - If a file cannot be opened, a banner says why, and the file shown before
   stays. If the format is not certain, a window asks which one it is.
+
+## Examples
+
+Each link opens the viewer in the browser with that example loaded
+(`?example=<name>` in the address; the welcome screen shows the link of each
+example when the pointer is on it).
+
+| Source | Example (opens in the browser) |
+|---|---|
+| FNIRSI DPOX180H | [1 kHz square wave, CH1](https://afmiguel.github.io/waveglance/?example=dpox180h-1khz-square) |
+| FNIRSI DPOX180H | [Two channels, CH2 in AC](https://afmiguel.github.io/waveglance/?example=dpox180h-two-channels) |
+| FNIRSI 1013D | [1 kHz square wave, CH1 and CH2](https://afmiguel.github.io/waveglance/?example=1013d-1khz-square) |
+| FNIRSI 1013D | [1 kHz square wave, clipped](https://afmiguel.github.io/waveglance/?example=1013d-clipped) |
+| FNIRSI 1013D | [Small AC signal, 50 mV/div](https://afmiguel.github.io/waveglance/?example=1013d-small-ac) |
+| FNIRSI 1013D | [1 MHz signal](https://afmiguel.github.io/waveglance/?example=1013d-1mhz) |
+| FNIRSI 1013D | [10 MHz signal](https://afmiguel.github.io/waveglance/?example=1013d-10mhz) |
+| FNIRSI 1013D | [500 kHz on two channels](https://afmiguel.github.io/waveglance/?example=1013d-500khz-2ch) |
+| FNIRSI 1013D | [Slow signal, about 1 Hz](https://afmiguel.github.io/waveglance/?example=1013d-1hz-slow) |
+| Rigol | [DHO1074: four channels (.bin)](https://afmiguel.github.io/waveglance/?example=rigol-dho1074) |
+| Rigol | [MSO5000: 1 kHz on four channels (.bin)](https://afmiguel.github.io/waveglance/?example=rigol-mso5000) |
+| Rigol | [DS2072A: 1 kHz, two channels (CSV)](https://afmiguel.github.io/waveglance/?example=rigol-ds2072a) |
+| Rigol | [DS1102E: 4 kHz, two channels (CSV)](https://afmiguel.github.io/waveglance/?example=rigol-ds1102e) |
+| Logic (VCD) | [CPU bus: write and read cycles](https://afmiguel.github.io/waveglance/?example=vcd-memory-bus) |
+| Logic (VCD) | [8-bit DAC: code and analog output](https://afmiguel.github.io/waveglance/?example=vcd-dac-sine) |
+| Logic (VCD) | [UART: AT command and reply](https://afmiguel.github.io/waveglance/?example=vcd-uart-at) |
+| Logic (VCD) | [UART on an analog line (9600 baud)](https://afmiguel.github.io/waveglance/?example=vcd-uart-analog) |
+| Logic (VCD) | [UART: complete session (4 lines)](https://afmiguel.github.io/waveglance/?example=vcd-uart-session) |
+| Logic (VCD) | [I2C: temperature sensor](https://afmiguel.github.io/waveglance/?example=vcd-i2c-sensor) |
+| Logic (VCD) | [I2C on two analog channels](https://afmiguel.github.io/waveglance/?example=vcd-i2c-analog) |
+| Logic (VCD) | [SPI: flash memory](https://afmiguel.github.io/waveglance/?example=vcd-spi-flash) |
+| Logic (VCD) | [SPI on two analog channels (no CS)](https://afmiguel.github.io/waveglance/?example=vcd-spi-analog) |
 
 ## Supported files
 
@@ -260,6 +299,23 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - Keyboard: Ctrl/⌘+O open, Ctrl/⌘+P print, F1 help, F/H/V fit, Z zoom view,
   S FFT, Y volts/div, C cursors, Tab + arrows move a cursor, 1/2 hide a
   channel, +/− zoom, arrows pan, [ and ] previous/next search result.
+
+## Help wanted: files of other instruments
+
+WaveGlance was tested with the files listed in [Supported files](#supported-files).
+Files of other models and firmware versions help the most (for example a
+FNIRSI 1014D, a DPOX180H in Single trigger mode, or a format that is not read
+yet). Please [open an issue](https://github.com/afmiguel/waveglance/issues/new/choose)
+with the file and, if you can, a photo of the instrument screen. Suggestions
+(formats, protocol decoders, measurements) are welcome in the same place.
+
+## Desktop programs
+
+The [Releases](https://github.com/afmiguel/waveglance/releases) page has
+programs for macOS (Apple Silicon and Intel), Windows and Linux: unzip and run
+`waveglance`. They are not signed: on macOS, right-click the program and choose
+Open the first time; on Windows, choose "More info" → "Run anyway" if
+SmartScreen asks. The browser version has the same functions.
 
 ## Build and run
 
@@ -440,3 +496,18 @@ The files in `assets/examples/dpox180h/` are DPOX180H captures saved for this
 project by its author (a 1 kHz square wave on CH1, and on CH1 and CH2 with CH2
 in AC coupling). They are part of this project, under the same terms as its
 source code.
+
+## License
+
+WaveGlance is licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), or
+- MIT license ([LICENSE-MIT](LICENSE-MIT)),
+
+at your option. The example files in `assets/examples/` keep their own
+licenses (see [Example files](#example-files)): the FNIRSI 1013D captures are
+CC BY-NC 4.0 and the Rigol captures are BSD 3-Clause.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in WaveGlance by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.

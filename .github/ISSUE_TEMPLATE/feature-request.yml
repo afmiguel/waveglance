@@ -1,0 +1,20 @@
+name: Suggestion
+description: A new file format, protocol decoder, measurement or other idea.
+labels: ["suggestion"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like WaveGlance to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What for
+      description: The problem it solves for you (a lab, a project, a class…).
+  - type: textarea
+    id: files
+    attributes:
+      label: Example files
+      description: For a new format or protocol, an example file helps a lot.

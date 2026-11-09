@@ -577,5 +577,5 @@ fn example_card(ui: &mut egui::Ui, e: &examples::Example, width: f32) -> egui::R
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    response.on_hover_text(e.about)
+    response.on_hover_text(format!("{}\n\nLink: {}", e.about, examples::link(e)))
 }

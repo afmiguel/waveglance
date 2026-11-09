@@ -5,9 +5,24 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.30.0 — 2026-11-08
+
+- **License: MIT or Apache-2.0**, at your option (`LICENSE-MIT`,
+  `LICENSE-APACHE`). The example files keep their own licenses.
+- **Links to the examples:** `https://afmiguel.github.io/waveglance/?example=<name>`
+  opens the viewer with that example (for instance `?example=vcd-uart-session`).
+  The README lists the link of every example; the welcome screen shows it
+  when the pointer is on an example.
+- **Desktop programs** for macOS (Apple Silicon and Intel), Windows and Linux
+  on the GitHub Releases page, built for each version tag by
+  `.github/workflows/release.yml`, with the notes of the version.
+- README: a demo animation at the top, how to try it, the desktop programs,
+  a call for files of other instruments, and the license. Issue forms for a
+  file that does not open and for suggestions.
+
 ## 0.29.0 — 2026-11-08
 
-- **Examples on the welcome screen.** The welcome screen lists the 17
+- **Examples on the welcome screen.** The welcome screen lists the 22
   built-in examples as cards, by source (FNIRSI DPOX180H, FNIRSI 1013D, Rigol,
   Logic (VCD)), with the file type on each card and the description on hover;
   a click opens the example. Two columns on a wide screen, one on a phone;

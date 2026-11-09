@@ -22,6 +22,28 @@ pub struct Example {
     pub bytes: &'static [u8],
 }
 
+impl Example {
+    /// The short name of the example, for a link: the file name without
+    /// "example-" and the extension ("vcd-uart-session").
+    pub fn id(&self) -> &'static str {
+        let name = self.file.strip_prefix("example-").unwrap_or(self.file);
+        name.rsplit_once('.').map_or(name, |(stem, _)| stem)
+    }
+}
+
+/// The example with short name `id` (see [`Example::id`]).
+pub fn find(id: &str) -> Option<&'static Example> {
+    EXAMPLES.iter().find(|e| e.id() == id)
+}
+
+/// The address of the site.
+pub const SITE: &str = "https://afmiguel.github.io/waveglance/";
+
+/// A link that opens example `e` on the site.
+pub fn link(e: &Example) -> String {
+    format!("{SITE}?example={}", e.id())
+}
+
 /// A group of examples from one source, with its credit (shown in the menu).
 pub struct Group {
     pub name: &'static str,
@@ -237,6 +259,20 @@ pub const EXAMPLES: &[Example] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn example_ids_are_unique_and_found() {
+        let mut ids: Vec<&str> = EXAMPLES.iter().map(Example::id).collect();
+        assert_eq!(
+            find("vcd-uart-session").map(|e| e.file),
+            Some("example-vcd-uart-session.vcd")
+        );
+        ids.sort_unstable();
+        let n = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), n);
+        assert!(find("nothing").is_none());
+    }
 
     #[test]
     fn all_examples_parse() {

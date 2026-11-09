@@ -1,7 +1,8 @@
 [package]
 name = "waveglance"
-version = "0.29.0"
+version = "0.30.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/afmiguel/waveglance"
 homepage = "https://afmiguel.github.io/waveglance/"
 readme = "README.md"
@@ -37,7 +38,7 @@ env_logger = "=0.11.11"
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "=0.4.80"
 js-sys = "=0.3.107"
-web-sys = { version = "=0.3.107", features = ["Window", "Document", "HtmlCanvasElement", "Element", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement", "HtmlElement", "DomTokenList"] }
+web-sys = { version = "=0.3.107", features = ["Window", "Document", "HtmlCanvasElement", "Element", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement", "HtmlElement", "DomTokenList", "Location"] }
 
 [profile.release]
 opt-level = 2

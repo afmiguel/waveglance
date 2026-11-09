@@ -517,6 +517,10 @@ impl ScopeApp {
         {
             app.cursors.set_mode(mode);
         }
+        // A link to an example (…/?example=vcd-uart-session) opens it.
+        if let Some(e) = example_in_address().and_then(|id| examples::find(&id)) {
+            app.load_bytes(e.file.to_owned(), e.bytes);
+        }
         app
     }
 
@@ -1048,6 +1052,24 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, DECODE_KEY, &self.decoders);
         eframe::set_value(storage, DECODE_RADIX_KEY, &self.decode_radix);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
+    }
+}
+
+/// The example named in the address of the page (`?example=<id>`), on the
+/// web. `None` on the desktop.
+fn example_in_address() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let search = web_sys::window()?.location().search().ok()?;
+        search
+            .trim_start_matches('?')
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("example="))
+            .map(str::to_owned)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
     }
 }
 

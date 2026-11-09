@@ -1,0 +1,42 @@
+name: A file does not open (or opens wrong)
+description: A waveform file that WaveGlance cannot read, or shows wrong values.
+labels: ["file format"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you! Files from instruments that were not tested yet help the most.
+        Please attach the file (zip it if GitHub refuses the extension), and a
+        photo or screenshot of the instrument screen if you have one: it gives
+        the expected V/div, time/div and values.
+  - type: input
+    id: instrument
+    attributes:
+      label: Instrument
+      description: Maker, model and firmware version, if you know it.
+      placeholder: FNIRSI DPOX180H, firmware 1.2.3
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: The error message, or what is wrong in the plot or the readouts.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the instrument showed
+      description: V/div, time/div, coupling, trigger, measurements… (a photo is fine).
+  - type: textarea
+    id: files
+    attributes:
+      label: The file
+      description: Drag the file (or a zip) here. By attaching it, you agree that it may be used to test WaveGlance.
+  - type: input
+    id: version
+    attributes:
+      label: WaveGlance version
+      description: Shown next to the title (top left).
+      placeholder: v0.30.0
