@@ -1,14 +1,13 @@
 //! Example files built into the app (File → Open example).
 //!
+//! - DPOX180H captures saved for this project by its author: see
+//!   `assets/examples/dpox180h/README.md`.
 //! - FNIRSI 1013D captures by lexus2026HA, CC BY-NC 4.0: see
 //!   `assets/examples/1013d/README.md`.
 //! - Rigol captures from the RigolWFM project by Scott Prahl, BSD 3-Clause:
 //!   see `assets/examples/rigol/README.md`.
 //! - VCD files made by `scripts/make-vcd-examples.py` for this project:
 //!   see `assets/examples/vcd/README.md`.
-//!
-//! - DPOX180H captures saved for this project by its author: see
-//!   `assets/examples/dpox180h/README.md`.
 
 /// One built-in example file.
 pub struct Example {

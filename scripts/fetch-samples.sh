@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Download real DPOX180H .wav files for the integration tests.
+# Download the real sample files of the integration tests: FNIRSI DPOX180H
+# and 1013D .wav files, Keysight/Agilent .bin files, and Rigol .bin, .wfm and
+# CSV files. They go into tests/data/ (git-ignored).
 #
-# The files come from github.com/Rav263/fnirsi-wave-decoder. That repository
+# The DPOX180H files come from github.com/Rav263/fnirsi-wave-decoder. That repository
 # has no license, so the files are NOT committed here: this script copies
 # them into tests/data/ (git-ignored).
 set -euo pipefail

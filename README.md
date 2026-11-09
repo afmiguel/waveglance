@@ -41,8 +41,8 @@ mode, time cursors T1 and T2, automatic measurements and the Math channel.*
 - **Reference waveform**: a second file drawn faint behind the traces.
 - **Export** to CSV, **screenshot** (PNG) and **print**, with a white screen
   for paper.
-- **Built-in examples**: real DPOX180H, 1013D and Rigol captures, and VCD files with
-  buses and UART lines.
+- **Built-in examples**: real DPOX180H, 1013D and Rigol captures, and VCD
+  files with a CPU bus, a DAC, and UART, I2C and SPI lines.
 - The settings (Y mode, measurements, FFT, cursors, decoder…) are kept for the
   next session.
 
@@ -289,7 +289,7 @@ this on each push to `main`.
 |------|----------|
 | `src/model.rs` | Internal model: `Capture`, `Trace`, `Samples`, display settings |
 | `src/formats/` | One module per file format, detection (`probe`) and `open` |
-| `src/app/` | User interface: `mod.rs` (state), `menus`, `readouts`, `plot`, `input`, `dialogs`, `actions`, `format` |
+| `src/app/` | User interface: `mod.rs` (state), `menus`, `readouts`, `plot`, `input`, `dialogs`, `actions`, `format`, `decoder` (the decoders in the plot, menu and rows) |
 | `src/measure.rs`, `src/fft.rs`, `src/cursors.rs` | Measurements, spectrum, cursors (work on any trace) |
 | `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`, `i2c.rs`, `spi.rs`) |
 | `src/export.rs`, `src/examples.rs`, `src/palette.rs` | CSV/PNG/print, built-in examples, colours |
@@ -297,6 +297,12 @@ this on each push to `main`.
 To add a file format: write a module in `src/formats/` that implements
 `Format` (`name`, `probe`, `read` → `Capture`), add it to `FORMATS`, and add
 tests with real files.
+
+To add a protocol decoder: write a module in `src/decode/` that makes
+`Frame`s from one or more `Logic` signals, add a variant to `Protocol` and its
+settings to `Settings`, call it from `decode::decode`, and add its settings to
+the line submenu in `src/app/decoder.rs`. Add an example to
+`scripts/make-vcd-examples.py` and tests.
 
 ## Versions
 

@@ -5,6 +5,14 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.28.1 — 2026-11-08
+
+- Texts that still described a FNIRSI-only viewer: the welcome screen (it now
+  lists the analysis tools and decoders), Help (the examples), the page
+  description for search engines, the GitHub description and topics, the
+  Cargo metadata (repository, homepage, keywords) and some comments.
+- README: how to add a protocol decoder; the `decoder` module in the code table.
+
 ## 0.28.0 — 2026-11-08
 
 - **New name: WaveGlance** (it was fnirsi-viewer). The viewer reads files of

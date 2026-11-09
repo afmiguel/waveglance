@@ -1,7 +1,12 @@
 [package]
 name = "waveglance"
-version = "0.28.0"
+version = "0.28.1"
 edition = "2024"
+repository = "https://github.com/afmiguel/waveglance"
+homepage = "https://afmiguel.github.io/waveglance/"
+readme = "README.md"
+keywords = ["oscilloscope", "logic-analyzer", "waveform", "vcd", "decoder"]
+categories = ["science", "visualization", "embedded"]
 description = "Viewer for oscilloscope and logic analyzer files (FNIRSI, Keysight, Rigol, VCD, CSV), with measurements, FFT and UART/I2C/SPI decoders"
 
 [lib]
