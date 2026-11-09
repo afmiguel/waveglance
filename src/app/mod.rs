@@ -550,6 +550,10 @@ impl ScopeApp {
     /// Find the format of a file and read it. If the format is not certain,
     /// the "Which format is this file?" window asks the user.
     fn open_bytes(&mut self, target: LoadTarget, name: String, bytes: &[u8]) {
+        if let Err(e) = formats::check_size(bytes.len()) {
+            self.report_open_error(&name, &e.to_string());
+            return;
+        }
         match formats::decide(bytes) {
             formats::Decision::Read(format) => self.read_as(target, name, bytes, format),
             formats::Decision::Ask(candidates) => {
@@ -799,14 +803,10 @@ impl ScopeApp {
         let t = self.traces();
         let (a, b) = (t.get(self.math.a)?, t.get(self.math.b)?);
         let (pa, pb) = (a.points(), b.points());
-        if pa.len() != pb.len() {
+        let points = math_points(pa, pb, |x, y| self.math.op.apply(x, y));
+        if points.is_empty() {
             return None;
         }
-        let points = pa
-            .iter()
-            .zip(pb)
-            .map(|(p, q)| [p[0], self.math.op.apply(p[1], q[1])])
-            .collect();
         let mut trace = Trace::new(
             TraceId::Math,
             "MATH",
@@ -1055,6 +1055,34 @@ impl eframe::App for ScopeApp {
     }
 }
 
+/// The points of `f(a, b)`, sample by sample. When the two traces have the
+/// same sample times (within 1/1000 of a step), the samples are paired by
+/// index; otherwise B is interpolated (linearly) at each time of A, and only
+/// the times where both traces have data are kept. Two channels with
+/// different time bases are never paired by index.
+fn math_points(pa: &[[f64; 2]], pb: &[[f64; 2]], f: impl Fn(f64, f64) -> f64) -> Vec<[f64; 2]> {
+    let step = pa
+        .windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs())
+        .find(|d| *d > 0.0)
+        .unwrap_or(0.0);
+    let same_times = pa.len() == pb.len()
+        && pa
+            .iter()
+            .zip(pb)
+            .all(|(p, q)| (p[0] - q[0]).abs() <= step * 1e-3);
+    if same_times {
+        return pa
+            .iter()
+            .zip(pb)
+            .map(|(p, q)| [p[0], f(p[1], q[1])])
+            .collect();
+    }
+    pa.iter()
+        .filter_map(|p| cursors::value_at(pb, p[0]).map(|y| [p[0], f(p[1], y)]))
+        .collect()
+}
+
 /// The example named in the address of the page (`?example=<id>`), on the
 /// web. `None` on the desktop.
 fn example_in_address() -> Option<String> {
@@ -1207,6 +1235,26 @@ mod tests {
         use crate::measure::Measurement as M;
         assert!(M::Frequency.applies_to_logic() && M::DutyCycle.applies_to_logic());
         assert!(!M::Vpp.applies_to_logic() && !M::RiseTime.applies_to_logic());
+    }
+
+    #[test]
+    fn math_pairs_samples_by_time() {
+        use super::math_points;
+        let diff = |x: f64, y: f64| x - y;
+        // Same times: paired by index.
+        let a = [[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]];
+        let b = [[0.0, 1.0], [1.0, 1.0], [2.0, 1.0]];
+        assert_eq!(
+            math_points(&a, &b, diff),
+            [[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]]
+        );
+        // Same length, B shifted by half a step: B is interpolated at A's
+        // times, and A's last time (after B ends) is left out.
+        let b = [[-0.5, 0.0], [0.5, 1.0], [1.5, 2.0]];
+        assert_eq!(math_points(&a, &b, diff), [[0.0, 0.5], [1.0, 0.5]]);
+        // No overlap: nothing.
+        let b = [[10.0, 0.0], [11.0, 0.0], [12.0, 0.0]];
+        assert!(math_points(&a, &b, diff).is_empty());
     }
 
     #[test]

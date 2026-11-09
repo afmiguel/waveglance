@@ -103,6 +103,7 @@ pub fn decide(bytes: &[u8]) -> Decision {
 /// # Errors
 /// A [`ReadError`]: the error of the most likely format, or "unknown file".
 pub fn open(bytes: &[u8]) -> Result<Capture, ReadError> {
+    check_size(bytes.len())?;
     let mut first_error = None;
     for (format, _) in detect(bytes) {
         match format.read(bytes) {
@@ -120,6 +121,26 @@ pub fn open(bytes: &[u8]) -> Result<Capture, ReadError> {
             names.join(", ")
         ))
     }))
+}
+
+/// The largest file that is read (256 MiB). A text file (CSV, VCD) takes
+/// several times its size in memory while it is read, and the web version
+/// has a few GB at most.
+pub const MAX_FILE_BYTES: usize = 256 * 1024 * 1024;
+
+/// An error for a file larger than [`MAX_FILE_BYTES`].
+///
+/// # Errors
+/// A [`ReadError`] that says the size and the limit.
+pub fn check_size(len: usize) -> Result<(), ReadError> {
+    if len > MAX_FILE_BYTES {
+        return Err(ReadError(format!(
+            "the file is too large ({} MB; the limit is {} MB)",
+            len / (1024 * 1024),
+            MAX_FILE_BYTES / (1024 * 1024)
+        )));
+    }
+    Ok(())
 }
 
 /// A nice V/div in the 1-2-5 sequence, for formats that do not store it:

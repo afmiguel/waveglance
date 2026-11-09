@@ -48,7 +48,7 @@ impl ScopeApp {
         }
         ui.separator();
         ui.label(
-            RichText::new("Sample by sample, in volts. Measured like a channel (MATH row).")
+            RichText::new("Sample by sample, in volts, at the times of A (B is interpolated when its samples are at other times). Measured like a channel (MATH row).")
                 .small()
                 .color(palette::hint()),
         );

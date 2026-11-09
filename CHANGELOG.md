@@ -5,6 +5,39 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.31.0 — 2026-11-09
+
+Fixes from an independent review of the project:
+
+- Fix: the keys 1 and 2 crashed the app with a one-channel file (or with no
+  file open).
+- Fix: a damaged Keysight/Rigol `.bin` file (a huge waveform count with a
+  header size of 0) made the reader loop billions of times. The reader now
+  checks the waveform count against the file size, the header and buffer
+  sizes, and the time step (positive and finite), and refuses the file with a
+  message.
+- Fix: Math paired the samples of A and B by index when they had the same
+  count, even with different time origins or steps. Now B is interpolated at
+  the times of A when the sample times differ.
+- Fix: a CSV file was taken as evenly sampled after checking about 1000 of
+  its times; a local jump in between was lost. Now every time is checked.
+- Files over 256 MB are refused with a message (on the desktop, before they
+  are read); a VCD file may have up to 4096 signals and 20 million value
+  changes (more than 255 real variables no longer overflow the channel
+  number).
+- FFT: up to 1,048,576 samples (was 65,536); when the span shown has more,
+  the N readout says "N … of …" and explains that the first samples are used.
+- New robustness tests: every built-in example cut at many lengths, with
+  random bytes changed, random data behind each format's signature, and
+  absurd counts; no reader may panic or take more than a few seconds.
+- CI: a new workflow runs `cargo fmt --check`, Clippy with warnings as errors
+  (desktop and WebAssembly), all the tests with the real sample files, the
+  robustness tests in release mode, and `cargo audit`, on every push.
+- Build security: GitHub Actions pinned by commit SHA, the Rust version
+  pinned (1.97.1), the Trunk download checked against its SHA-256, the least
+  permissions per job (only the deploy and release jobs can write), and a
+  `SHA256SUMS.txt` with the desktop programs of each release.
+
 ## 0.30.1 — 2026-11-08
 
 - Release workflow: the macOS programs are built on `macos-latest` (the

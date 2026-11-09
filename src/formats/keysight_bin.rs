@@ -65,6 +65,10 @@ impl Format for KeysightBinFormat {
     }
 }
 
+/// Bytes of the fixed part of a waveform header (the fields that are read):
+/// 5 × u32, f32, 3 × f64, 2 × u32, text 16 + 16 + 24 + 16.
+const WAVEFORM_HEADER_MIN: usize = 5 * 4 + 4 + 3 * 8 + 2 * 4 + 16 + 16 + 24 + 16;
+
 /// The format version (1, 3 or 10) if the file starts with "AG" or "RG"
 /// and a known version.
 fn version(bytes: &[u8]) -> Option<u32> {
@@ -144,7 +148,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
     } else {
         r.u32()?;
     }
-    let n_waveforms = r.u32()?;
+    let n_waveforms = r.u32()? as usize;
+    // Each waveform needs at least its fixed header: a count larger than
+    // the file can hold is damage, not a reason to loop.
+    if n_waveforms > (bytes.len() - r.at) / WAVEFORM_HEADER_MIN {
+        return Err(ReadError(format!(
+            "Keysight .bin: the header says {n_waveforms} waveforms, more than the file can hold"
+        )));
+    }
     let mut traces = Vec::new();
     let mut warnings = Vec::new();
     let mut model = String::new();
@@ -168,8 +179,19 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         let _time = r.text(16)?;
         let frame = r.text(24)?;
         let label = r.text(16)?;
-        // Skip the rest of the header (time tag, segment, extensions).
+        // Skip the rest of the header (time tag, segment, extensions). The
+        // header size must cover the fields just read, and stay in the file.
+        if header_size < r.at - start || start + header_size > bytes.len() {
+            return Err(ReadError(format!(
+                "Keysight .bin: waveform header size {header_size} at byte {start} is not valid"
+            )));
+        }
         r.at = start + header_size;
+        if !(x_increment.is_finite() && x_increment > 0.0) || !x_origin.is_finite() {
+            return Err(ReadError(format!(
+                "Keysight .bin: {label}: time step {x_increment} or origin {x_origin} is not valid"
+            )));
+        }
 
         if model.is_empty() {
             model = frame.split(':').next().unwrap_or("").trim().to_owned();
@@ -369,6 +391,44 @@ mod tests {
             (w.traces[0].label.as_str(), w.traces[0].unit),
             ("CH3", Unit::Ampere)
         );
+    }
+
+    /// The file header: "AG10", file size, number of waveforms.
+    fn with_header(n_waveforms: u32, body: &[u8]) -> Vec<u8> {
+        let mut f = b"AG10".to_vec();
+        f.extend(((12 + body.len()) as u32).to_le_bytes());
+        f.extend(n_waveforms.to_le_bytes());
+        f.extend(body);
+        f
+    }
+
+    /// The waveform part of [`fake`] (without the 12-byte file header).
+    fn waveform(n: usize) -> Vec<u8> {
+        fake(n, "1", 1)[12..].to_vec()
+    }
+
+    #[test]
+    fn damaged_headers_are_refused_quickly() {
+        // A huge waveform count with a header size of 0 used to read the same
+        // header again and again (billions of times).
+        let mut w = waveform(4);
+        w[0..4].copy_from_slice(&0u32.to_le_bytes());
+        let start = std::time::Instant::now();
+        assert!(read(&with_header(u32::MAX, &w)).is_err());
+        assert!(read(&with_header(3, &w)).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        // A header size beyond the end of the file.
+        let mut w = waveform(4);
+        w[0..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(read(&with_header(1, &w)).is_err());
+        // A time step of 0 or NaN.
+        for dt in [0.0f64, f64::NAN, -1e-6] {
+            let mut w = waveform(4);
+            w[32..40].copy_from_slice(&dt.to_le_bytes());
+            assert!(read(&with_header(1, &w)).is_err(), "dt {dt}");
+        }
+        // The real header still reads.
+        assert!(read(&with_header(1, &waveform(4))).is_ok());
     }
 
     #[test]

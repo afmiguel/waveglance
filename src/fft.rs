@@ -11,8 +11,12 @@
 use serde::{Deserialize, Serialize};
 use std::f64::consts::{PI, SQRT_2, TAU};
 
-/// The most samples used: a longer window uses its first samples only.
-pub const MAX_SAMPLES: usize = 1 << 16;
+/// The most samples used: a longer window uses its first samples only (the
+/// app says so in its N readout).
+pub const MAX_SAMPLES: usize = 1 << 20;
+/// Points at which a trace with uneven times (logic signals, some CSV files)
+/// is sampled for the FFT.
+pub const RESAMPLE_POINTS: usize = 1 << 16;
 
 /// Window function applied before the FFT.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]

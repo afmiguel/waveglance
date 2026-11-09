@@ -218,7 +218,10 @@ CS active and released.*
 mode, time cursors T1 and T2, automatic measurements and the Math channel.*
 
 - **Σ Math ▾**: CH1 + CH2 or CH1 − CH2 (sample by sample, in volts), drawn
-  and measured like a channel (MATH row).
+  and measured like a channel (MATH row). When the two channels have samples
+  at different times (another time origin or step), B is interpolated at the
+  times of A, over the part where both have data; they are never paired by
+  index.
 - **⌕ Search ▾**: rising edges, falling edges or glitches in the whole record
   of a channel. Marks on the bottom edge show them; [ and ] centre the view on
   the previous and next one.
@@ -237,6 +240,11 @@ mode, time cursors T1 and T2, automatic measurements and the Math channel.*
   already includes the probe setting).
 - If a file cannot be opened, a banner says why, and the file shown before
   stays. If the format is not certain, a window asks which one it is.
+- Files up to 256 MB are read (larger ones are refused with a message, on the
+  desktop before they are loaded). A VCD file may have up to 4096 signals and
+  20 million value changes. The FFT uses up to 1,048,576 samples of the span
+  shown; when the span has more, the N readout says "N … of …" in orange and
+  the FFT covers the first ones.
 
 ## Examples
 

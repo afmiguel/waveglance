@@ -175,8 +175,10 @@ impl ScopeApp {
     }
 
     /// The spectrum of the source channel over the visible time span, from
-    /// the cache when nothing changed: (channel, spectrum, samples used).
-    pub(super) fn current_spectrum(&mut self) -> Option<(usize, fft::Spectrum, usize)> {
+    /// the cache when nothing changed: (channel, spectrum, samples used,
+    /// samples in the span). More samples than `fft::MAX_SAMPLES`: only the
+    /// first ones are used.
+    pub(super) fn current_spectrum(&mut self) -> Option<(usize, fft::Spectrum, usize, usize)> {
         let source = self.fft_source()?;
         let ch = self.traces().get(source)?;
         let points = ch.points();
@@ -196,14 +198,14 @@ impl ScopeApp {
             span.end().to_bits(),
         );
         // Uneven times (logic signals, some CSV files): the FFT needs evenly
-        // spaced samples, so the span is sampled at MAX_SAMPLES points.
+        // spaced samples, so the span is sampled at RESAMPLE_POINTS points.
         let uneven = matches!(ch.samples, Samples::Timed(_));
-        let count = if uneven { fft::MAX_SAMPLES } else { count };
+        let count = if uneven { fft::RESAMPLE_POINTS } else { count };
         if self.fft_cache.as_ref().map(|c| c.0) != Some(key) {
             let (values, dt) = if uneven {
                 let (t0, t1) = (*span.start(), *span.end());
-                let dt = (t1 - t0) / fft::MAX_SAMPLES as f64;
-                let mut values = hold_resample(points, t0, dt, fft::MAX_SAMPLES);
+                let dt = (t1 - t0) / fft::RESAMPLE_POINTS as f64;
+                let mut values = hold_resample(points, t0, dt, fft::RESAMPLE_POINTS);
                 // A logic level is mostly DC: remove the mean, so that the
                 // pulses, not the DC line, set the scale.
                 if ch.is_digital() {
@@ -218,7 +220,7 @@ impl ScopeApp {
             self.fft_cache = Some((key, fft::spectrum(&values, dt, self.fft.window)));
         }
         let spectrum = self.fft_cache.as_ref()?.1.clone()?;
-        Some((source, spectrum, count.min(fft::MAX_SAMPLES)))
+        Some((source, spectrum, count.min(fft::MAX_SAMPLES), count))
     }
 
     /// The shortest time between two changes of trace `i` in the span shown.
@@ -238,12 +240,12 @@ impl ScopeApp {
     /// trace with uneven times.
     fn fft_span_step(&self) -> Option<f64> {
         let span = self.last_transform.as_ref()?.bounds().range_x();
-        Some((span.end() - span.start()) / fft::MAX_SAMPLES as f64)
+        Some((span.end() - span.start()) / fft::RESAMPLE_POINTS as f64)
     }
 
     /// The FFT panel: a header with the peak, and the spectrum plot.
     pub(super) fn fft_view(&mut self, ui: &mut egui::Ui) {
-        let Some((source, spectrum, count)) = self.current_spectrum() else {
+        let Some((source, spectrum, count, total)) = self.current_spectrum() else {
             ui.label(
                 RichText::new("FFT: not enough samples in the time span shown")
                     .color(palette::hint()),
@@ -325,11 +327,22 @@ impl ScopeApp {
                     );
                 }
             }
-            readout(ui, "N", Some(count.to_string()), palette::fg_dim()).on_hover_text(if logic {
-                "Samples used: the time span shown, sampled evenly"
+            if total > count {
+                // Only the start of the span: say so.
+                readout(ui, "N", Some(format!("{count} of {total}")), palette::warn_text())
+                    .on_hover_text(format!(
+                        "The time span shown has {total} samples; the FFT uses the first {count} \
+                         (from the left edge). Zoom in to analyse another part."
+                    ));
             } else {
-                "Samples used (the time span shown)"
-            });
+                readout(ui, "N", Some(count.to_string()), palette::fg_dim()).on_hover_text(
+                    if logic {
+                        "Samples used: the time span shown, sampled evenly"
+                    } else {
+                        "Samples used (the time span shown)"
+                    },
+                );
+            }
             if ui
                 .small_button("⛶ Fit")
                 .on_hover_text(

@@ -127,6 +127,12 @@ fn vendor_of(version: &str) -> String {
 ///
 /// # Errors
 /// A [`ReadError`] if there is no `$var` with values.
+/// The most signals ($var) read from a file.
+pub const MAX_VARS: usize = 4096;
+/// The most value changes read from a file (each is drawn as up to two
+/// points).
+pub const MAX_CHANGES: usize = 20_000_000;
+
 pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
     let text = String::from_utf8_lossy(bytes);
     let mut tokens = text.split_whitespace().peekable();
@@ -169,6 +175,11 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
                     continue;
                 }
                 if !ids.contains_key(id) {
+                    if vars.len() >= MAX_VARS {
+                        return Err(ReadError(format!(
+                            "VCD: more than {MAX_VARS} signals; this viewer shows at most {MAX_VARS}"
+                        )));
+                    }
                     ids.insert(id.to_owned(), vars.len());
                     vars.push(Var {
                         name,
@@ -205,7 +216,13 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
     // Value changes.
     let mut now: u64 = 0;
     let mut end: u64 = 0;
+    let mut total_changes = 0usize;
     while let Some(tok) = tokens.next() {
+        if total_changes > MAX_CHANGES {
+            return Err(ReadError(format!(
+                "VCD: more than {MAX_CHANGES} value changes; cut the record shorter"
+            )));
+        }
         let mut set = |id: &str, v: f64, now: u64| {
             if let Some(&i) = ids.get(id) {
                 let var = &mut vars[i];
@@ -226,6 +243,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
                     return;
                 }
                 ch.push((now, v));
+                total_changes += 1;
             }
         };
         let mut chars = tok.chars();
@@ -278,8 +296,9 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
                     (lo.min(p[1]), hi.max(p[1]))
                 });
+            // Analog numbers are u8: more than 255 real variables keep 255.
             Trace::new(
-                TraceId::Analog(traces.len() as u8 + 1),
+                TraceId::Analog(u8::try_from(traces.len() + 1).unwrap_or(u8::MAX)),
                 var.name,
                 Samples::Timed(points),
                 Display {

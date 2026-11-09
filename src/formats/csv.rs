@@ -345,13 +345,17 @@ pub fn read(bytes: &[u8]) -> Result<Capture, ReadError> {
         warnings.push("the time column is not in increasing order".into());
     }
 
-    // Evenly spaced? Then store as uniform samples (4 bytes each).
+    // Evenly spaced? Then store as uniform samples (4 bytes each). Every
+    // sample is checked: each time must be within 1 % of a step of its place
+    // on the even grid (the printed times are rounded), so a gap or a jump
+    // anywhere keeps the real times.
     let dt = (times[n - 1] - times[0]) / (n - 1) as f64;
-    let step = (n / 1000).max(1);
     let uniform = dt > 0.0
-        && (0..n)
-            .step_by(step)
-            .all(|i| (times[i] - (times[0] + i as f64 * dt)).abs() <= dt * 1e-3);
+        && dt.is_finite()
+        && times
+            .iter()
+            .enumerate()
+            .all(|(i, &t)| (t - (times[0] + i as f64 * dt)).abs() <= dt * 1e-2);
 
     let mut traces = Vec::new();
     for (k, &col) in value_columns.iter().enumerate() {
@@ -531,6 +535,25 @@ mod tests {
         let w = read_str("t,v\n0,1\n1,2\n3,3\n6,4\n10,5\n");
         assert!(matches!(w.traces[0].samples, Samples::Timed(_)));
         assert_eq!(w.traces[0].points()[3], [6.0, 4.0]);
+    }
+
+    #[test]
+    fn one_local_jump_keeps_the_real_times() {
+        // 5000 samples 1 ms apart, but two samples in the middle swapped
+        // in time (so the first and last times still fit an even grid). The
+        // old check looked at every 5th sample and missed it.
+        let mut text = String::from("t,v\n");
+        for i in 0..5000 {
+            let t = match i {
+                2501 => 2.5025,
+                2502 => 2.5015,
+                _ => i as f64 * 1e-3,
+            };
+            text.push_str(&format!("{t},{i}\n"));
+        }
+        let w = read_str(&text);
+        assert!(matches!(w.traces[0].samples, Samples::Timed(_)));
+        assert_eq!(w.traces[0].points()[2501][0], 2.5025);
     }
 
     #[test]

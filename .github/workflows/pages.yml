@@ -6,10 +6,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Each job gets only what it needs: building reads the code; only the
+# deploy job can publish the site.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # One deployment at a time; a newer push cancels an older one.
 concurrency:
@@ -17,44 +17,54 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RUST_VERSION: "1.97.1"
   TRUNK_VERSION: v0.21.14
+  # SHA-256 of trunk-x86_64-unknown-linux-gnu.tar.gz (the same as the
+  # .sha256 file published with the Trunk release).
+  TRUNK_SHA256: f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust with the wasm32 target
         run: |
-          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
-          rustup default stable
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
-      - name: Install Trunk
+      - name: Install Trunk (checksum verified)
         run: |
-          curl -sSfL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C /usr/local/bin trunk
+          curl -sSfL -o trunk.tar.gz \
+            "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${TRUNK_SHA256}  trunk.tar.gz" | sha256sum -c -
+          tar -xzf trunk.tar.gz -C /usr/local/bin trunk
+          rm trunk.tar.gz
           trunk --version
 
       - id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Build
         # base_path is "/<repository>/" for a project site.
         run: trunk build --release --public-url "${{ steps.pages.outputs.base_path }}/"
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

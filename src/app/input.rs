@@ -76,7 +76,7 @@ impl ScopeApp {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let result = std::fs::read(file.path()).map_err(|e| e.to_string());
+            let result = read_file(file.path());
             let _ = self.inbox_tx.send((LoadTarget::Main, name, result));
         }
         #[cfg(target_arch = "wasm32")]
@@ -115,7 +115,7 @@ impl ScopeApp {
                 let name = path
                     .file_name()
                     .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-                let result = std::fs::read(&path).map_err(|e| e.to_string());
+                let result = read_file(&path);
                 let _ = self.inbox_tx.send((target, name, result));
             }
         }
@@ -242,9 +242,12 @@ impl ScopeApp {
                 CursorMode::Both => CursorMode::Off,
             });
         }
+        // 1 and 2: hide or show CH1 and CH2 (only the traces the file has).
         for (i, k) in [Key::Num1, Key::Num2].into_iter().enumerate() {
-            if key(Modifiers::NONE, k) {
-                self.visible[i] = !self.visible[i];
+            if key(Modifiers::NONE, k)
+                && let Some(v) = self.visible.get_mut(i)
+            {
+                *v = !*v;
             }
         }
         // Tab presses taken by `raw_input_hook` (cursors on).
@@ -300,4 +303,13 @@ impl ScopeApp {
             }
         }
     }
+}
+
+/// Read a file on the desktop, after checking its size: a file over the
+/// limit is refused before it is loaded into memory.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_file(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    let len = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    formats::check_size(usize::try_from(len).unwrap_or(usize::MAX)).map_err(|e| e.to_string())?;
+    std::fs::read(path).map_err(|e| e.to_string())
 }
