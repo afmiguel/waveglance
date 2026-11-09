@@ -9,6 +9,7 @@ pub mod examples;
 pub mod export;
 pub mod fft;
 pub mod formats;
+pub mod i18n;
 pub mod measure;
 pub mod model;
 pub mod palette;

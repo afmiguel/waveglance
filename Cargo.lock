@@ -3372,7 +3372,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
 dependencies = [
+ "js-sys",
  "libc",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -3791,7 +3794,7 @@ dependencies = [
 
 [[package]]
 name = "waveglance"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "binrw",
  "eframe",
@@ -3802,6 +3805,7 @@ dependencies = [
  "png",
  "rfd",
  "serde",
+ "sys-locale",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

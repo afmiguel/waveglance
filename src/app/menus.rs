@@ -7,14 +7,14 @@ impl ScopeApp {
     pub(super) fn math_menu(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
         if labels.len() < 2 {
-            ui.label("Needs two channels in the file.");
+            ui.label(tr("Needs two channels in the file."));
             return;
         }
         let buses = self.bus_flags();
         let mut m = self.math;
         for op in MathOp::ALL {
             let text = match op {
-                MathOp::Off => "Off".to_owned(),
+                MathOp::Off => tr("Off").to_owned(),
                 _ => format!("A {} B", op.symbol()),
             };
             ui.radio_value(&mut m.op, op, text);
@@ -48,7 +48,7 @@ impl ScopeApp {
         }
         ui.separator();
         ui.label(
-            RichText::new("Sample by sample, in volts, at the times of A (B is interpolated when its samples are at other times). Measured like a channel (MATH row).")
+            RichText::new(tr("Sample by sample, in volts, at the times of A (B is interpolated when its samples are at other times). Measured like a channel (MATH row)."))
                 .small()
                 .color(palette::hint()),
         );
@@ -59,13 +59,13 @@ impl ScopeApp {
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
         let buses = self.bus_flags();
         let mut kind = self.search.kind;
-        ui.radio_value(&mut kind, None, "Off");
+        ui.radio_value(&mut kind, None, tr("Off"));
         for k in measure::EventKind::ALL {
             ui.radio_value(&mut kind, Some(k), k.label()).on_hover_text(match k {
                 measure::EventKind::Glitch => {
-                    "Pulses much shorter than the others (shorter than 10% of the typical time between edges)"
+                    tr("Pulses much shorter than the others (shorter than 10% of the typical time between edges)")
                 }
-                _ => "At the 50% level between Vbase and Vtop, with hysteresis (10%–90%)",
+                _ => tr("At the 50% level between Vbase and Vtop, with hysteresis (10%–90%)"),
             });
         }
         if kind != self.search.kind {
@@ -74,7 +74,7 @@ impl ScopeApp {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label("In:");
+            ui.label(tr("In:"));
             for (i, name) in labels.iter().enumerate() {
                 if ui
                     .add_enabled(
@@ -94,15 +94,19 @@ impl ScopeApp {
         });
         if self.search.kind.is_some() {
             ui.separator();
-            ui.label(format!(
-                "{} found in the whole record",
-                self.search.events.len()
+            ui.label(crate::trf!(
+                "{a0} found in the whole record",
+                a0 = self.search.events.len()
             ));
             ui.horizontal(|ui| {
-                if ui.button("◀ Previous").on_hover_text("Key [").clicked() {
+                if ui
+                    .button(tr("◀ Previous"))
+                    .on_hover_text(tr("Key ["))
+                    .clicked()
+                {
                     self.search_step(-1);
                 }
-                if ui.button("Next ▶").on_hover_text("Key ]").clicked() {
+                if ui.button(tr("Next ▶")).on_hover_text(tr("Key ]")).clicked() {
                     self.search_step(1);
                 }
             });
@@ -112,10 +116,10 @@ impl ScopeApp {
     /// Contents of the Y menu: Volts (default) / Div, as radio buttons.
     pub(super) fn y_axis_buttons(&mut self, ui: &mut egui::Ui) {
         let mut y_axis = self.y_axis;
-        ui.radio_value(&mut y_axis, YAxis::Volts, "Volts")
-            .on_hover_text("Vertical axis in volts: both channels share the axis");
-        ui.radio_value(&mut y_axis, YAxis::Divisions, "Div").on_hover_text(
-            "Vertical axis in divisions, like the scope screen: each channel has its own V/div and ground marker",
+        ui.radio_value(&mut y_axis, YAxis::Volts, tr("Volts"))
+            .on_hover_text(tr("Vertical axis in volts: both channels share the axis"));
+        ui.radio_value(&mut y_axis, YAxis::Divisions, tr("Div")).on_hover_text(
+            tr("Vertical axis in divisions, like the scope screen: each channel has its own V/div and ground marker"),
         );
         if y_axis != self.y_axis {
             self.set_y_axis(y_axis);
@@ -126,8 +130,10 @@ impl ScopeApp {
         {
             ui.separator();
             if ui
-                .button("Reset channel positions and scales")
-                .on_hover_text("Put the ground markers and the V/div back as the scope had them")
+                .button(tr("Reset channel positions and scales"))
+                .on_hover_text(tr(
+                    "Put the ground markers and the V/div back as the scope had them",
+                ))
                 .clicked()
             {
                 self.ground_shift.iter_mut().for_each(|s| *s = 0.0);
@@ -141,65 +147,71 @@ impl ScopeApp {
     pub(super) fn file_menu(&mut self, ui: &mut egui::Ui) {
         let loaded = self.waveform.is_some();
         if ui
-            .button("Open file…")
-            .on_hover_text("Open a FNIRSI .wav file (Ctrl/⌘+O), or drop it on the window")
+            .button(tr("Open file…"))
+            .on_hover_text(tr("Open a file (Ctrl/⌘+O), or drop it on the window"))
             .clicked()
         {
             ui.close();
             self.open_file_dialog(ui.ctx());
         }
-        ui.menu_button("Open example", |ui| {
+        ui.menu_button(tr("Open example"), |ui| {
             for (k, g) in examples::GROUPS.iter().enumerate() {
                 if k > 0 {
                     ui.separator();
                 }
-                ui.label(RichText::new(g.name).strong());
+                ui.label(RichText::new(tr(g.name)).strong());
                 for e in examples::EXAMPLES.iter().filter(|e| e.group == g.name) {
-                    if ui.button(e.label).on_hover_text(e.about).clicked() {
+                    if ui.button(tr(e.label)).on_hover_text(tr(e.about)).clicked() {
                         self.load_bytes(e.file.to_owned(), e.bytes);
                         ui.close();
                     }
                 }
-                ui.label(RichText::new(g.credit).small().color(palette::hint()));
+                ui.label(RichText::new(tr(g.credit)).small().color(palette::hint()));
             }
         });
         ui.separator();
         if ui
-            .add_enabled(loaded, egui::Button::new("Open reference…"))
-            .on_hover_text("Open a second file, drawn faint behind the traces, to compare with")
+            .add_enabled(loaded, egui::Button::new(tr("Open reference…")))
+            .on_hover_text(tr(
+                "Open a second file, drawn faint behind the traces, to compare with",
+            ))
             .clicked()
         {
             ui.close();
             self.open_dialog(ui.ctx(), LoadTarget::Reference);
         }
         if let Some((name, _)) = &self.reference {
-            let label = format!("Show reference ({name})");
+            let label = crate::trf!("Show reference ({name})", name = name);
             ui.checkbox(&mut self.show_reference, label);
-            if ui.button("Close reference").clicked() {
+            if ui.button(tr("Close reference")).clicked() {
                 self.reference = None;
                 ui.close();
             }
         }
         ui.separator();
         if ui
-            .add_enabled(loaded, egui::Button::new("Export CSV…"))
-            .on_hover_text("Save the samples as a table: time and the voltage of each channel")
+            .add_enabled(loaded, egui::Button::new(tr("Export CSV…")))
+            .on_hover_text(tr(
+                "Save the samples as a table: time and the voltage of each channel",
+            ))
             .clicked()
         {
             ui.close();
             self.export_csv();
         }
         if ui
-            .add_enabled(loaded, egui::Button::new("Save screenshot (PNG)…"))
-            .on_hover_text("Save a picture of the plots and readouts, as shown")
+            .add_enabled(loaded, egui::Button::new(tr("Save screenshot (PNG)…")))
+            .on_hover_text(tr("Save a picture of the plots and readouts, as shown"))
             .clicked()
         {
             ui.close();
             self.start_shot(ui.ctx(), ShotPurpose::Save, None);
         }
         if ui
-            .add_enabled(loaded, egui::Button::new("Print…"))
-            .on_hover_text("Print the plots and readouts on a white screen (Ctrl/⌘+P)")
+            .add_enabled(loaded, egui::Button::new(tr("Print…")))
+            .on_hover_text(tr(
+                "Print the plots and readouts on a white screen (Ctrl/⌘+P)",
+            ))
             .clicked()
         {
             ui.close();
@@ -215,24 +227,24 @@ impl ScopeApp {
             // The model comes from the loaded file.
             let title = match &self.waveform {
                 Some(w) => w.source.title(),
-                None => "WaveGlance".to_owned(),
+                None => tr("WaveGlance").to_owned(),
             };
             ui.label(RichText::new(title).strong().color(palette::fg_dim()))
-                .on_hover_text("Reads FNIRSI DPOX180H and 1013D/1014D .wav, Keysight/Agilent .bin, Rigol .bin and .wfm, VCD, and CSV files of any oscilloscope");
+                .on_hover_text(tr("Reads FNIRSI DPOX180H and 1013D/1014D .wav, Keysight/Agilent .bin, Rigol .bin and .wfm, Digilent WaveForms .csv and .txt, VCD, and CSV files of any oscilloscope"));
             // Version, discreet: identifies the build (also between releases).
             ui.label(
                 RichText::new(format!("v{VERSION}"))
                     .small()
                     .color(palette::hint()),
             )
-            .on_hover_text(format!("WaveGlance {VERSION}, commit {GIT_HASH}"));
+            .on_hover_text(crate::trf!("WaveGlance {VERSION}, commit {GIT_HASH}", VERSION = VERSION, GIT_HASH = GIT_HASH));
             ui.add_space(8.0);
-            ui.menu_button("⏏ File ▾", |ui| {
+            ui.menu_button(tr("⏏ File ▾"), |ui| {
                 ui.style_mut().wrap_mode = None;
                 self.file_menu(ui);
             })
             .response
-            .on_hover_text("Open, examples, reference, export, print");
+            .on_hover_text(tr("Open, examples, reference, export, print"));
             let loaded = self.waveform.is_some();
             // All the options are menu buttons with ▾, so the bar is the same
             // on a wide and on a narrow (phone) screen. Each one is a single
@@ -248,35 +260,35 @@ impl ScopeApp {
             toolbar_menu(
                 ui,
                 loaded,
-                "⛶ Fit ▾".to_owned(),
-                "Fit the view to the waveform",
+                tr("⛶ Fit ▾").to_owned(),
+                tr("Fit the view to the waveform"),
                 None,
                 |ui| self.fit_buttons(ui),
             );
             ui.add_space(8.0);
             let y_label = match self.y_axis {
-                YAxis::Volts => "Y: Volts ▾",
-                YAxis::Divisions => "Y: Div ▾",
+                YAxis::Volts => tr("Y: Volts ▾"),
+                YAxis::Divisions => tr("Y: Div ▾"),
             };
             let logic = self.logic_only();
             if logic {
-                logic_disabled(ui, "Y: Logic", "the lanes have no voltage axis");
+                logic_disabled(ui, tr("Y: Logic"), tr("the lanes have no voltage axis"));
             } else {
                 toolbar_menu(
                     ui,
                     true,
                     y_label.to_owned(),
-                    "Vertical axis: volts, or divisions like the scope screen",
+                    tr("Vertical axis: volts, or divisions like the scope screen"),
                     None,
                     |ui| self.y_axis_buttons(ui),
                 );
             }
             ui.add_space(8.0);
             if ui
-                .add_enabled(loaded, egui::Button::selectable(self.zoom_view, "⊕ Zoom"))
+                .add_enabled(loaded, egui::Button::selectable(self.zoom_view, tr("⊕ Zoom")))
                 .on_hover_text(
-                    "Zoom view: an overview of the whole record above the plot. \
-                     Click or drag in it to move, wheel to zoom.",
+                    tr("Zoom view: an overview of the whole record above the plot. \
+                     Click or drag in it to move, wheel to zoom."),
                 )
                 .clicked()
             {
@@ -296,21 +308,21 @@ impl ScopeApp {
                 ui,
                 loaded,
                 fft_label,
-                "Spectrum of a channel (FFT) under the plot",
+                tr("Spectrum of a channel (FFT) under the plot"),
                 stay_open(),
                 |ui| self.fft_menu(ui),
             );
             ui.add_space(8.0);
             // Cursor menu: the button shows the mode in use.
             let cursor_label = match self.cursors.mode {
-                CursorMode::Off => "⌖ Cursors ▾".to_owned(),
-                m => format!("⌖ Cursors: {} ▾", cursor_mode_name(m)),
+                CursorMode::Off => tr("⌖ Cursors ▾").to_owned(),
+                m => crate::trf!("⌖ Cursors: {a0} ▾", a0 = cursor_mode_name(m)),
             };
             toolbar_menu(
                 ui,
                 loaded,
                 cursor_label,
-                "Measurement cursors",
+                tr("Measurement cursors"),
                 None,
                 |ui| self.cursor_menu(ui),
             );
@@ -320,39 +332,39 @@ impl ScopeApp {
             toolbar_menu(
                 ui,
                 true,
-                "▤ Measure ▾".to_owned(),
-                "Choose the automatic measurements to show",
+                tr("▤ Measure ▾").to_owned(),
+                tr("Choose the automatic measurements to show"),
                 stay_open(),
                 |ui| self.measure_menu(ui),
             );
             ui.add_space(8.0);
             let math_label = if !self.math_available() {
-                "Σ Math ▾".to_owned()
+                tr("Σ Math ▾").to_owned()
             } else {
-                format!("Σ Math: {} ▾", self.math_label())
+                crate::trf!("Σ Math: {a0} ▾", a0 = self.math_label())
             };
             if logic {
-                logic_disabled(ui, "Σ Math ▾", "the Math operations work on voltages");
+                logic_disabled(ui, tr("Σ Math ▾"), tr("the Math operations work on voltages"));
             } else {
                 toolbar_menu(
                     ui,
                     loaded,
                     math_label,
-                    "A channel computed from CH1 and CH2",
+                    tr("A channel computed from CH1 and CH2"),
                     None,
                     |ui| self.math_menu(ui),
                 );
             }
             ui.add_space(8.0);
             let search_label = match self.search.kind {
-                Some(k) => format!("⌕ Search: {} ▾", k.label()),
-                None => "⌕ Search ▾".to_owned(),
+                Some(k) => crate::trf!("⌕ Search: {a0} ▾", a0 = k.label()),
+                None => tr("⌕ Search ▾").to_owned(),
             };
             toolbar_menu(
                 ui,
                 loaded,
                 search_label,
-                "Find edges or glitches in the whole record",
+                tr("Find edges or glitches in the whole record"),
                 stay_open(),
                 |ui| self.search_menu(ui),
             );
@@ -361,30 +373,42 @@ impl ScopeApp {
             // The count only: a name would change the width of the button,
             // and the open menu would jump when a line is checked.
             let decode_label = match decoded.len() {
-                0 => "⇄ Decode ▾".to_owned(),
-                n => format!("⇄ Decode: ×{n} ▾"),
+                0 => tr("⇄ Decode ▾").to_owned(),
+                n => crate::trf!("⇄ Decode: ×{n} ▾", n = n),
             };
             toolbar_menu(
                 ui,
                 loaded,
                 decode_label,
-                "Protocol decoder (logic analyzer): serial data as bytes",
+                tr("Protocol decoder (logic analyzer): serial data as bytes"),
                 stay_open(),
                 |ui| self.decode_menu(ui),
             );
             ui.add_space(8.0);
             let (theme_label, theme_tip) = if self.light_theme {
-                ("◐ Black", "Black screen, like the scope")
+                (tr("◐ Black"), tr("Black screen, like the scope"))
             } else {
-                ("◐ White", "White screen with darker traces, for printing")
+                (tr("◐ White"), tr("White screen with darker traces, for printing"))
             };
             if ui.button(theme_label).on_hover_text(theme_tip).clicked() {
                 self.set_light_theme(ui.ctx(), !self.light_theme);
             }
             ui.add_space(8.0);
+            let lang = crate::i18n::current();
+            ui.menu_button(format!("🌐 {} ▾", lang.code()), |ui| {
+                for l in crate::i18n::Lang::ALL {
+                    if ui.radio(lang == l, l.name()).clicked() {
+                        crate::i18n::set(l);
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text(tr("Language of the interface"));
+            ui.add_space(8.0);
             if ui
-                .button("? Help")
-                .on_hover_text("How to use the viewer: controls, cursors, measurements")
+                .button(tr("? Help"))
+                .on_hover_text(tr("How to use the viewer: controls, cursors, measurements"))
                 .clicked()
             {
                 self.help_open = !self.help_open;
@@ -399,16 +423,16 @@ impl ScopeApp {
     /// The three Fit buttons.
     pub(super) fn fit_buttons(&mut self, ui: &mut egui::Ui) {
         for (label, fit, tip) in [
-            ("⬌ Fit H", Fit::Horizontal, "Show the whole record"),
+            (tr("⬌ Fit H"), Fit::Horizontal, tr("Show the whole record")),
             (
-                "⬍ Fit V",
+                tr("⬍ Fit V"),
                 Fit::Vertical,
-                "Fit the voltage axis to the samples between the first and last instant shown",
+                tr("Fit the voltage axis to the samples between the first and last instant shown"),
             ),
             (
-                "⛶ Fit both",
+                tr("⛶ Fit both"),
                 Fit::Both,
-                "Full time span, then fit the voltage axis",
+                tr("Full time span, then fit the voltage axis"),
             ),
         ] {
             if ui.button(label).on_hover_text(tip).clicked() {
@@ -419,13 +443,13 @@ impl ScopeApp {
         if ui
             .add_enabled(
                 self.screen_window().is_some(),
-                egui::Button::new("Scope screen"),
+                egui::Button::new(tr("Scope screen")),
             )
-            .on_hover_text(
+            .on_hover_text(tr(
                 "Show the time window the scope showed on its screen (the file opens on it). \
                  Fit H shows the whole record.",
-            )
-            .on_disabled_hover_text("This file does not store the screen window")
+            ))
+            .on_disabled_hover_text(tr("This file does not store the screen window"))
             .clicked()
         {
             self.pending_fit = Some(Fit::Screen);
@@ -438,22 +462,25 @@ impl ScopeApp {
     pub(super) fn cursor_menu(&mut self, ui: &mut egui::Ui) {
         let mut mode = self.cursors.mode;
         for (m, tip) in [
-            (CursorMode::Off, "No cursors"),
-            (CursorMode::Time, "Time cursors T1 and T2 (vertical lines)"),
+            (CursorMode::Off, tr("No cursors")),
+            (
+                CursorMode::Time,
+                tr("Time cursors T1 and T2 (vertical lines)"),
+            ),
             (
                 CursorMode::Volt,
-                "Voltage cursors V1 and V2 (horizontal lines)",
+                tr("Voltage cursors V1 and V2 (horizontal lines)"),
             ),
-            (CursorMode::Both, "Time and voltage cursors"),
+            (CursorMode::Both, tr("Time and voltage cursors")),
         ] {
             // Logic only: voltage cursors measure nothing.
             let enabled = !(self.logic_only() && m.shows_volt());
             ui.add_enabled_ui(enabled, |ui| {
                 ui.radio_value(&mut mode, m, cursor_mode_name(m))
                     .on_hover_text(tip)
-                    .on_disabled_hover_text(
+                    .on_disabled_hover_text(tr(
                         "Only logic signals in this file: voltage cursors measure nothing",
-                    );
+                    ));
             });
         }
         if mode != self.cursors.mode {
@@ -462,15 +489,18 @@ impl ScopeApp {
         }
         ui.separator();
         if ui
-            .add_enabled(mode != CursorMode::Off, egui::Button::new("Bring to view"))
-            .on_hover_text("Move the cursors to 1/4 and 3/4 of the screen")
+            .add_enabled(
+                mode != CursorMode::Off,
+                egui::Button::new(tr("Bring to view")),
+            )
+            .on_hover_text(tr("Move the cursors to 1/4 and 3/4 of the screen"))
             .clicked()
         {
             self.cursors.bring_to_view();
             ui.close();
         }
         ui.label(
-            RichText::new("Drag a dashed cursor line to move it.")
+            RichText::new(tr("Drag a dashed cursor line to move it."))
                 .small()
                 .color(palette::hint()),
         );
@@ -485,7 +515,7 @@ impl ScopeApp {
         let m = &mut self.measure;
         if !labels.is_empty() {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Channels:");
+                ui.label(tr("Channels:"));
                 for (i, name) in labels.iter().enumerate() {
                     let mut on = m.is_measured(name) && !buses[i];
                     if ui
@@ -504,18 +534,18 @@ impl ScopeApp {
                 }
             });
         }
-        ui.checkbox(&mut m.stats, "Statistics per cycle")
-            .on_hover_text(
+        ui.checkbox(&mut m.stats, tr("Statistics per cycle"))
+            .on_hover_text(tr(
                 "A window with mean, min, max, σ and number of cycles of the time measurements",
-            );
+            ));
         ui.horizontal(|ui| {
-            ui.label("Samples:");
+            ui.label(tr("Samples:"));
             for w in measure::Window::ALL {
                 let tip = match w {
-                    measure::Window::Screen => "The time span shown now",
-                    measure::Window::Record => "All the samples in the file",
+                    measure::Window::Screen => tr("The time span shown now"),
+                    measure::Window::Record => tr("All the samples in the file"),
                     measure::Window::Cursors => {
-                        "Between the time cursors (the screen if they are off)"
+                        tr("Between the time cursors (the screen if they are off)")
                     }
                 };
                 ui.selectable_value(&mut m.window, w, w.label())
@@ -530,13 +560,13 @@ impl ScopeApp {
             let r = ui
                 .add_enabled(enabled, egui::Checkbox::new(&mut on, item.label()))
                 .on_hover_text(item.description())
-                .on_disabled_hover_text(format!(
-                    "{}\nNot for logic signals: {}",
-                    item.description(),
-                    if item.unit() == measure::Unit::Volt {
+                .on_disabled_hover_text(crate::trf!(
+                    "{a0}\nNot for logic signals: {a1}",
+                    a0 = item.description(),
+                    a1 = if item.unit() == measure::Unit::Volt {
                         "the level is only 0 or 1"
                     } else {
-                        "the steps are ideal"
+                        tr("the steps are ideal")
                     }
                 ));
             if r.changed() {
@@ -545,15 +575,15 @@ impl ScopeApp {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("All").clicked() {
+            if ui.button(tr("All")).clicked() {
                 m.selected = Measurement::ALL.to_vec();
             }
-            if ui.button("None").clicked() {
+            if ui.button(tr("None")).clicked() {
                 m.selected.clear();
             }
             if ui
-                .button("Default")
-                .on_hover_text("Freq and Vpp, both channels, screen samples")
+                .button(tr("Default"))
+                .on_hover_text(tr("Freq and Vpp, both channels, screen samples"))
                 .clicked()
             {
                 *m = measure::Settings::default();
@@ -564,9 +594,9 @@ impl ScopeApp {
     /// Contents of the FFT menu.
     pub(super) fn fft_menu(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.traces().iter().map(|t| t.label.clone()).collect();
-        ui.checkbox(&mut self.fft.show, "Show FFT");
+        ui.checkbox(&mut self.fft.show, tr("Show FFT"));
         ui.separator();
-        ui.label("Source:");
+        ui.label(tr("Source:"));
         let buses = self.bus_flags();
         let source = self.fft_source();
         ui.horizontal_wrapped(|ui| {
@@ -586,28 +616,28 @@ impl ScopeApp {
                 }
             }
         });
-        ui.label("Window:");
+        ui.label(tr("Window:"));
         for w in fft::Window::ALL {
             ui.radio_value(&mut self.fft.window, w, w.label())
                 .on_hover_text(w.description());
         }
-        ui.label("Scale:");
+        ui.label(tr("Scale:"));
         ui.horizontal(|ui| {
-            ui.radio_value(&mut self.fft.db, true, "dBV")
-                .on_hover_text("Decibels relative to 1 V RMS");
+            ui.radio_value(&mut self.fft.db, true, tr("dBV"))
+                .on_hover_text(tr("Decibels relative to 1 V RMS"));
             ui.radio_value(&mut self.fft.db, false, "V RMS");
         });
-        ui.label("Draw:");
+        ui.label(tr("Draw:"));
         ui.horizontal(|ui| {
-            ui.radio_value(&mut self.fft.bars, false, "Line")
-                .on_hover_text("A line through the levels of the frequency bins");
-            ui.radio_value(&mut self.fft.bars, true, "Bars").on_hover_text(
-                "One bar per frequency bin, like a spectrum analyzer. Zoomed out, the bins in one screen column make one bar (the highest level)",
+            ui.radio_value(&mut self.fft.bars, false, tr("Line"))
+                .on_hover_text(tr("A line through the levels of the frequency bins"));
+            ui.radio_value(&mut self.fft.bars, true, tr("Bars")).on_hover_text(
+                tr("One bar per frequency bin, like a spectrum analyzer. Zoomed out, the bins in one screen column make one bar (the highest level)"),
             );
         });
         ui.separator();
         ui.label(
-            RichText::new("The FFT uses the samples shown in the time plot.")
+            RichText::new(tr("The FFT uses the samples shown in the time plot."))
                 .small()
                 .color(palette::hint()),
         );
@@ -635,7 +665,7 @@ pub(super) fn toolbar_menu(
 ) {
     if !enabled {
         ui.add_enabled(false, egui::Button::new(label))
-            .on_disabled_hover_text(format!("{tip} (open a file first)"));
+            .on_disabled_hover_text(crate::trf!("{tip} (open a file first)", tip = tip));
         return;
     }
     let mut button = egui::containers::menu::MenuButton::new(label);
@@ -653,15 +683,18 @@ pub(super) fn toolbar_menu(
 /// A toolbar button that is off because the file has only logic signals.
 fn logic_disabled(ui: &mut egui::Ui, label: &str, why: &str) {
     ui.add_enabled(false, egui::Button::new(label))
-        .on_disabled_hover_text(format!("Only logic signals in this file: {why}"));
+        .on_disabled_hover_text(crate::trf!(
+            "Only logic signals in this file: {why}",
+            why = why
+        ));
 }
 
 /// Name of a cursor mode, for the menu.
 pub(super) fn cursor_mode_name(mode: CursorMode) -> &'static str {
     match mode {
-        CursorMode::Off => "Off",
-        CursorMode::Time => "Time",
-        CursorMode::Volt => "Volt",
-        CursorMode::Both => "Both",
+        CursorMode::Off => tr("Off"),
+        CursorMode::Time => tr("Time"),
+        CursorMode::Volt => tr("Volt"),
+        CursorMode::Both => tr("Both"),
     }
 }

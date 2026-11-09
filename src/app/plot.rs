@@ -247,7 +247,7 @@ impl ScopeApp {
     pub(super) fn fft_view(&mut self, ui: &mut egui::Ui) {
         let Some((source, spectrum, count, total)) = self.current_spectrum() else {
             ui.label(
-                RichText::new("FFT: not enough samples in the time span shown")
+                RichText::new(tr("FFT: not enough samples in the time span shown"))
                     .color(palette::hint()),
             );
             return;
@@ -260,7 +260,7 @@ impl ScopeApp {
         // A logic level that does not change in the span: no spectrum.
         if logic && peak.is_none_or(|(_, v)| v < 1e-9) {
             ui.label(
-                RichText::new("FFT: the signal does not change in the time span shown")
+                RichText::new(tr("FFT: the signal does not change in the time span shown"))
                     .color(palette::hint()),
             );
             return;
@@ -276,12 +276,12 @@ impl ScopeApp {
                 v
             }
         };
-        let db_unit = if logic { "dB" } else { "dBV" };
+        let db_unit = if logic { tr("dB") } else { tr("dBV") };
         let fmt_level = move |v: f64| {
             if logic {
                 String::new()
             } else if db {
-                format!(" {:.1} dBV", fft::dbv(v))
+                crate::trf!(" {a0} dBV", a0 = format!("{:.1}", fft::dbv(v)))
             } else {
                 format!(" {}", fmt_sig(v, "V", READOUT_DIGITS, 0.0))
             }
@@ -300,29 +300,25 @@ impl ScopeApp {
             if let Some((pf, pv)) = peak {
                 readout(
                     ui,
-                    "Peak",
+                    tr("Peak"),
                     Some(format!(
                         "{}{}",
-                        fmt_sig(pf, "Hz", READOUT_DIGITS, 0.0),
+                        fmt_sig(pf, tr("Hz"), READOUT_DIGITS, 0.0),
                         fmt_level(pv)
                     )),
                     color,
                 );
             }
             if let Some(df) = spectrum.resolution() {
-                readout(ui, "Δf", Some(fmt_sig(df, "Hz", 3, 0.0)), palette::fg_dim())
-                    .on_hover_text("Frequency step between the FFT bins");
+                readout(ui, "Δf", Some(fmt_sig(df, tr("Hz"), 3, 0.0)), palette::fg_dim())
+                    .on_hover_text(tr("Frequency step between the FFT bins"));
             }
             // Logic: the even sampling must be finer than the pulses.
             if logic && let Some(gap) = self.shortest_pulse(source) {
                 let dt = self.fft_span_step().unwrap_or(0.0);
                 if dt * 2.0 > gap {
                     ui.label(
-                        RichText::new(format!(
-                            "⚠ zoom in: the span shown is sampled every {}, the shortest pulse is {}",
-                            fmt_sig(dt, "s", 3, 0.0),
-                            fmt_sig(gap, "s", 3, 0.0)
-                        ))
+                        RichText::new(crate::trf!("⚠ zoom in: the span shown is sampled every {a0}, the shortest pulse is {a1}", a0 = fmt_sig(dt, "s", 3, 0.0), a1 = fmt_sig(gap, "s", 3, 0.0)))
                         .color(palette::warn_text()),
                     );
                 }
@@ -330,24 +326,21 @@ impl ScopeApp {
             if total > count {
                 // Only the start of the span: say so.
                 readout(ui, "N", Some(format!("{count} of {total}")), palette::warn_text())
-                    .on_hover_text(format!(
-                        "The time span shown has {total} samples; the FFT uses the first {count} \
-                         (from the left edge). Zoom in to analyse another part."
-                    ));
+                    .on_hover_text(crate::trf!("The time span shown has {total} samples; the FFT uses the first {count} (from the left edge). Zoom in to analyse another part.", total = total, count = count));
             } else {
                 readout(ui, "N", Some(count.to_string()), palette::fg_dim()).on_hover_text(
                     if logic {
-                        "Samples used: the time span shown, sampled evenly"
+                        tr("Samples used: the time span shown, sampled evenly")
                     } else {
-                        "Samples used (the time span shown)"
+                        tr("Samples used (the time span shown)")
                     },
                 );
             }
             if ui
-                .small_button("⛶ Fit")
+                .small_button(tr("⛶ Fit"))
                 .on_hover_text(
-                    "Show the spectrum up to 20 × the peak frequency, with all levels \
-                     (the start view). Double-click on the FFT plot does the same.",
+                    tr("Show the spectrum up to 20 × the peak frequency, with all levels \
+                     (the start view). Double-click on the FFT plot does the same."),
                 )
                 .clicked()
             {
@@ -376,8 +369,8 @@ impl ScopeApp {
         let mut plot = Plot::new(("fft", self.load_count, source, db, span_key))
             .show_grid(true)
             .grid_color(palette::grid())
-            .x_axis_label("Frequency")
-            .x_axis_formatter(|mark, _| si(mark.value, "Hz"))
+            .x_axis_label(tr("Frequency"))
+            .x_axis_formatter(|mark, _| si(mark.value, tr("Hz")))
             .default_x_bounds(0.0, f_max)
             .allow_scroll(false)
             .label_formatter(move |hover: &HoverPosition<'_>| {
@@ -390,14 +383,18 @@ impl ScopeApp {
                 } else {
                     si(p.y, "V")
                 };
-                Some(format!("f = {}\n{y}", si(p.x, "Hz")))
+                Some(format!("f = {}\n{y}", si(p.x, tr("Hz"))))
             });
         if std::mem::take(&mut self.fft_fit) {
             plot = plot.reset();
         }
         plot = if db {
-            plot.y_axis_label(if logic { "dB (rel. to peak)" } else { "dBV" })
-                .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+            plot.y_axis_label(if logic {
+                tr("dB (rel. to peak)")
+            } else {
+                tr("dBV")
+            })
+            .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
         } else {
             plot.y_axis_label("V RMS")
                 .y_axis_formatter(|mark, _| si(mark.value, "V"))
@@ -447,9 +444,11 @@ impl ScopeApp {
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         if self.waveform.is_none() || hovering {
             let text = if hovering {
-                "Release to load the file"
+                tr("Release to load the file")
             } else {
-                "Drop a waveform file here (FNIRSI .wav, Keysight .bin, Rigol .bin/.wfm, VCD, or CSV), or use File ▾ → Open file…"
+                tr(
+                    "Drop a waveform file here (FNIRSI .wav, Keysight .bin, Rigol .bin/.wfm, Digilent WaveForms, VCD, or CSV), or use File ▾ → Open file…",
+                )
             };
             ui.centered_and_justified(|ui| {
                 ui.label(RichText::new(text).size(18.0).color(palette::hint()))
@@ -539,36 +538,44 @@ impl ScopeApp {
         plot = if divisions {
             // A line per division, and thinner lines at 1/5 division when
             // zoomed in.
-            plot.y_axis_label(if logic_only { "Logic" } else { "Divisions" })
-                .y_grid_spacer(egui_plot::uniform_grid_spacer(|input| {
-                    let s = input.base_step_size;
-                    if s <= 0.2 {
-                        [0.2, 1.0, 4.0]
-                    } else if s <= 1.0 {
-                        [1.0, 4.0, 20.0]
-                    } else {
-                        [5.0, 20.0, 100.0]
-                    }
-                }))
-                .y_axis_formatter(move |mark, _| {
-                    let v = mark.value;
-                    if logic_only {
-                        String::new()
-                    } else if (v - v.round()).abs() < 1e-6 {
-                        format!("{}", v.round() as i64)
-                    } else {
-                        String::new()
-                    }
-                })
+            plot.y_axis_label(if logic_only {
+                tr("Logic")
+            } else {
+                tr("Divisions")
+            })
+            .y_grid_spacer(egui_plot::uniform_grid_spacer(|input| {
+                let s = input.base_step_size;
+                if s <= 0.2 {
+                    [0.2, 1.0, 4.0]
+                } else if s <= 1.0 {
+                    [1.0, 4.0, 20.0]
+                } else {
+                    [5.0, 20.0, 100.0]
+                }
+            }))
+            .y_axis_formatter(move |mark, _| {
+                let v = mark.value;
+                if logic_only {
+                    String::new()
+                } else if (v - v.round()).abs() < 1e-6 {
+                    format!("{}", v.round() as i64)
+                } else {
+                    String::new()
+                }
+            })
         } else {
-            plot.y_axis_label(if logic_only { "Logic" } else { "Voltage" })
-                .y_axis_formatter(move |mark, _| {
-                    if in_lanes(mark.value) {
-                        String::new()
-                    } else {
-                        si(mark.value, "V")
-                    }
-                })
+            plot.y_axis_label(if logic_only {
+                tr("Logic")
+            } else {
+                tr("Voltage")
+            })
+            .y_axis_formatter(move |mark, _| {
+                if in_lanes(mark.value) {
+                    String::new()
+                } else {
+                    si(mark.value, "V")
+                }
+            })
         };
         if show_fft {
             plot = plot.height(outer.height());
@@ -579,7 +586,7 @@ impl ScopeApp {
             .grid_color(palette::grid())
             // No legend: the OSD names the channels by colour, and a legend
             // covers the trace.
-            .x_axis_label("Time (trigger at t = 0)")
+            .x_axis_label(tr("Time (trigger at t = 0)"))
             .x_axis_formatter(|mark, _| si(mark.value, "s"))
             .label_formatter({
                 let maps = maps.clone();
@@ -854,11 +861,14 @@ impl ScopeApp {
             }
             if let (Some(i), None) = (over, self.marker_drag) {
                 let tip = if self.y_axis == YAxis::Divisions {
-                    format!("CH{}: 0 V. Drag to move the channel up or down.", i + 1)
+                    crate::trf!(
+                        "CH{a0}: 0 V. Drag to move the channel up or down.",
+                        a0 = i + 1
+                    )
                 } else {
-                    format!(
-                        "CH{}: 0 V. Drag to move the channel up or down (switches Y to Div: in Volts the channels share one axis).",
-                        i + 1
+                    crate::trf!(
+                        "CH{a0}: 0 V. Drag to move the channel up or down (switches Y to Div: in Volts the channels share one axis).",
+                        a0 = i + 1
                     )
                 };
                 egui::Tooltip::always_open(

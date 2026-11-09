@@ -13,6 +13,7 @@ use crate::cursors::{self, CursorMode, Cursors};
 use crate::decode;
 use crate::fft;
 use crate::formats;
+use crate::i18n::tr;
 use crate::measure::{self, Measurement, Unit};
 use crate::model::{Acquisition, Capture, Display, Samples, Trace, TraceId};
 use crate::palette;
@@ -41,6 +42,8 @@ const MEASURE_KEY: &str = "measure";
 const HIDE_SPLASH_KEY: &str = "hide_splash";
 /// Storage key of the screen theme (white background).
 const LIGHT_THEME_KEY: &str = "light_theme";
+/// Storage key of the interface language.
+const LANG_KEY: &str = "language";
 /// Mouse wheel distance (points) for one V/div step on a channel readout.
 const VDIV_WHEEL_STEP: f32 = 40.0;
 /// Storage key of the Math channel.
@@ -428,6 +431,13 @@ impl ScopeApp {
             .storage
             .and_then(|s| eframe::get_value(s, LIGHT_THEME_KEY))
             .unwrap_or(false);
+        // The language: the saved choice, else the one of the system or
+        // browser.
+        crate::i18n::set(
+            cc.storage
+                .and_then(|s| eframe::get_value(s, LANG_KEY))
+                .unwrap_or_else(crate::i18n::Lang::of_system),
+        );
         cc.egui_ctx.set_theme(if light_theme {
             egui::Theme::Light
         } else {
@@ -576,9 +586,9 @@ impl ScopeApp {
             formats::Decision::Read(format) => self.read_as(target, name, bytes, format),
             formats::Decision::Ask(candidates) => {
                 let reason = if candidates.is_empty() {
-                    "No known format was recognised in this file.".to_owned()
+                    tr("No known format was recognised in this file.").to_owned()
                 } else {
-                    "The format of this file is not certain.".to_owned()
+                    tr("The format of this file is not certain.").to_owned()
                 };
                 self.format_choice = Some(FormatChoice {
                     target,
@@ -664,7 +674,7 @@ impl ScopeApp {
             }
             Err(e) => {
                 let what = if target == LoadTarget::Reference {
-                    "reference "
+                    tr("reference ")
                 } else {
                     ""
                 };
@@ -981,10 +991,17 @@ impl ScopeApp {
     /// the message says so, so that its data is not taken for the new file.
     fn report_open_error(&mut self, name: &str, error: &str) {
         let still = match &self.file_name {
-            Some(shown) if self.waveform.is_some() => format!(" Still showing {shown}."),
+            Some(shown) if self.waveform.is_some() => {
+                crate::trf!(" Still showing {shown}.", shown = shown)
+            }
             _ => String::new(),
         };
-        self.error = Some(format!("Could not open {name}: {error}.{still}"));
+        self.error = Some(crate::trf!(
+            "Could not open {name}: {error}.{still}",
+            name = name,
+            error = error,
+            still = still
+        ));
     }
 
     /// Open a reference file (same detection as the main file).
@@ -1077,6 +1094,7 @@ impl eframe::App for ScopeApp {
         eframe::set_value(storage, DECODE_KEY, &self.decoders);
         eframe::set_value(storage, DECODE_RADIX_KEY, &self.decode_radix);
         eframe::set_value(storage, LIGHT_THEME_KEY, &self.light_theme);
+        eframe::set_value(storage, LANG_KEY, &crate::i18n::current());
     }
 }
 
@@ -1157,10 +1175,7 @@ fn guarded<T>(name: &str, step: impl FnOnce() -> T) -> Result<T, String> {
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_default();
         log::error!("internal error while reading {name}: {detail}");
-        format!(
-            "internal error in the reader ({detail}). The file may be damaged, or of a \
-             kind this viewer does not know. Please report it at {ISSUES}"
-        )
+        crate::trf!("internal error in the reader ({detail}). The file may be damaged, or of a kind this viewer does not know. Please report it at {ISSUES}", detail = detail, ISSUES = ISSUES)
     })
 }
 

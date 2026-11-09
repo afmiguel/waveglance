@@ -211,7 +211,7 @@ impl ScopeApp {
     /// Contents of the Decode menu: a check box per line, and the settings
     /// of each decoded line in its own submenu.
     pub(super) fn decode_menu(&mut self, ui: &mut egui::Ui) {
-        ui.label("Decode the lines checked:");
+        ui.label(tr("Decode the lines checked:"));
         // What the rows need, read before the decoders are changed.
         let rows: Vec<(usize, String, bool, Option<f64>)> = self
             .traces()
@@ -253,12 +253,15 @@ impl ScopeApp {
                             RichText::new(&label).color(palette::channel(i)),
                         ),
                     )
-                    .on_disabled_hover_text("A bus has values, not one line");
+                    .on_disabled_hover_text(tr("A bus has values, not one line"));
                     if d.on && !bus {
                         ui.menu_button(format!("{} ▸", summary(d)), |ui| {
-                            ui.label(RichText::new(format!("Decoder of {label}")).strong());
+                            ui.label(
+                                RichText::new(crate::trf!("Decoder of {label}", label = label))
+                                    .strong(),
+                            );
                             ui.horizontal(|ui| {
-                                ui.label("Protocol:");
+                                ui.label(tr("Protocol:"));
                                 for p in Protocol::ALL {
                                     ui.radio_value(&mut d.settings.protocol, p, p.label());
                                 }
@@ -266,7 +269,10 @@ impl ScopeApp {
                             ui.separator();
                             match d.settings.protocol {
                                 Protocol::I2c => {
-                                    ui.label(format!("{label} is SDA (data). Clock line (SCL):"));
+                                    ui.label(crate::trf!(
+                                        "{label} is SDA (data). Clock line (SCL):",
+                                        label = label
+                                    ));
                                     ui.horizontal_wrapped(|ui| {
                                         for (j, name) in lines.iter().filter(|(j, _)| *j != i) {
                                             ui.radio_value(
@@ -288,7 +294,7 @@ impl ScopeApp {
                             }
                         })
                         .response
-                        .on_hover_text("The protocol and settings of this line");
+                        .on_hover_text(tr("The protocol and settings of this line"));
                     }
                     ui.end_row();
                 }
@@ -296,7 +302,7 @@ impl ScopeApp {
         // Lines that are not in this file keep their settings for later.
         self.decoders = decoders;
         ui.separator();
-        ui.label("Show:");
+        ui.label(tr("Show:"));
         ui.horizontal(|ui| {
             for r in Radix::ALL {
                 ui.radio_value(&mut self.decode_radix, r, r.label());
@@ -304,10 +310,10 @@ impl ScopeApp {
         });
         ui.separator();
         ui.label(
-            RichText::new(
+            RichText::new(tr(
                 "Each line has its own settings (▸). The words are drawn just above \
                  the signal and listed under the plot; click a word in the list to show it.",
-            )
+            ))
             .small()
             .color(palette::hint()),
         );
@@ -341,9 +347,9 @@ impl ScopeApp {
                 .iter()
                 .filter(|f| matches!(f.kind, FrameKind::Data | FrameKind::Address { .. }))
                 .count();
-            let mut count = format!("{words} words");
+            let mut count = crate::trf!("{words} words", words = words);
             if errors > 0 {
-                count.push_str(&format!(", {errors} with errors"));
+                count.push_str(&crate::trf!(", {errors} with errors", errors = errors));
             }
             ui.label(RichText::new(count).monospace().color(if errors > 0 {
                 palette::warn_text()
@@ -357,8 +363,11 @@ impl ScopeApp {
             }
             if !d.frames.is_empty()
                 && ui
-                    .small_button("⎘ Copy")
-                    .on_hover_text(format!("Copy all the words of {label}, as shown"))
+                    .small_button(tr("⎘ Copy"))
+                    .on_hover_text(crate::trf!(
+                        "Copy all the words of {label}, as shown",
+                        label = label
+                    ))
                     .clicked()
             {
                 ui.ctx().copy_text(words_text(d, radix));
@@ -381,11 +390,12 @@ impl ScopeApp {
                 } else {
                     color
                 };
-                let tip = format!(
-                    "{label} #{} at {}\n{}\nClick to show it in the plot",
-                    i + 1,
-                    si(f.start, "s"),
-                    describe(f)
+                let tip = crate::trf!(
+                    "{label} #{a0} at {a1}\n{a2}\nClick to show it in the plot",
+                    label = label,
+                    a0 = i + 1,
+                    a1 = si(f.start, "s"),
+                    a2 = describe(f)
                 );
                 let r = ui
                     .add(
@@ -399,8 +409,11 @@ impl ScopeApp {
             }
             if d.frames.len() > ROW_MAX_WORDS {
                 ui.label(
-                    RichText::new(format!(" … {} more", d.frames.len() - ROW_MAX_WORDS))
-                        .color(palette::hint()),
+                    RichText::new(crate::trf!(
+                        " … {a0} more",
+                        a0 = d.frames.len() - ROW_MAX_WORDS
+                    ))
+                    .color(palette::hint()),
                 );
             }
         });
@@ -412,21 +425,25 @@ impl ScopeApp {
 fn summary(d: &LineDecoder) -> String {
     if d.settings.protocol == Protocol::Spi {
         return if d.clock.is_empty() {
-            "SPI, choose SCLK".to_owned()
+            tr("SPI, choose SCLK").to_owned()
         } else {
-            format!("SPI mode {}, SCLK: {}", d.settings.spi.mode, d.clock)
+            crate::trf!(
+                "SPI mode {a0}, SCLK: {a1}",
+                a0 = d.settings.spi.mode,
+                a1 = d.clock
+            )
         };
     }
     if d.settings.protocol == Protocol::I2c {
         return if d.clock.is_empty() {
-            "I2C, choose SCL".to_owned()
+            tr("I2C, choose SCL").to_owned()
         } else {
             format!("I2C SCL: {}", d.clock)
         };
     }
     let u = &d.settings.uart;
     let baud = if u.baud == 0 {
-        "Auto".to_owned()
+        tr("Auto").to_owned()
     } else {
         u.baud.to_string()
     };
@@ -446,11 +463,11 @@ fn summary(d: &LineDecoder) -> String {
 /// threshold of the last decoding.
 fn threshold_setting(ui: &mut egui::Ui, threshold: &mut Option<f64>, used: Option<f64>) {
     ui.horizontal(|ui| {
-        ui.label("Threshold:");
+        ui.label(tr("Threshold:"));
         let mut auto = threshold.is_none();
         if ui
-            .checkbox(&mut auto, "Auto")
-            .on_hover_text("The middle between the lowest and the highest sample")
+            .checkbox(&mut auto, tr("Auto"))
+            .on_hover_text(tr("The middle between the lowest and the highest sample"))
             .changed()
         {
             *threshold = if auto {
@@ -485,13 +502,16 @@ fn spi_settings(
     lines: &[(usize, String)],
     d: &mut LineDecoder,
 ) {
-    ui.label(format!("{label} is a data line (MOSI or MISO)."));
+    ui.label(crate::trf!(
+        "{label} is a data line (MOSI or MISO).",
+        label = label
+    ));
     let others = || lines.iter().filter(move |(j, _)| *j != i);
     egui::Grid::new(("spi_settings", label))
         .num_columns(2)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Clock (SCLK):");
+            ui.label(tr("Clock (SCLK):"));
             ui.horizontal_wrapped(|ui| {
                 for (j, name) in others() {
                     ui.radio_value(
@@ -502,10 +522,10 @@ fn spi_settings(
                 }
             });
             ui.end_row();
-            ui.label("Chip select (CS):");
+            ui.label(tr("Chip select (CS):"));
             ui.horizontal_wrapped(|ui| {
-                ui.radio_value(&mut d.select, String::new(), "None")
-                    .on_hover_text("Without CS, a pause of the clock starts a new word");
+                ui.radio_value(&mut d.select, String::new(), tr("None"))
+                    .on_hover_text(tr("Without CS, a pause of the clock starts a new word"));
                 for (j, name) in others().filter(|(_, n)| *n != d.clock) {
                     ui.radio_value(
                         &mut d.select,
@@ -517,28 +537,31 @@ fn spi_settings(
             ui.end_row();
             let s = &mut d.settings.spi;
             if !d.select.is_empty() {
-                ui.label("CS active:");
+                ui.label(tr("CS active:"));
                 ui.horizontal(|ui| {
-                    ui.radio_value(&mut s.cs_active_low, true, "Low");
-                    ui.radio_value(&mut s.cs_active_low, false, "High");
+                    ui.radio_value(&mut s.cs_active_low, true, tr("Low"));
+                    ui.radio_value(&mut s.cs_active_low, false, tr("High"));
                 });
                 ui.end_row();
             }
-            ui.label("Mode:");
+            ui.label(tr("Mode:"));
             ui.horizontal(|ui| {
                 for (m, tip) in [
-                    (0, "CPOL 0, CPHA 0: clock idle low, read on the rising edge"),
+                    (
+                        0,
+                        tr("CPOL 0, CPHA 0: clock idle low, read on the rising edge"),
+                    ),
                     (
                         1,
-                        "CPOL 0, CPHA 1: clock idle low, read on the falling edge",
+                        tr("CPOL 0, CPHA 1: clock idle low, read on the falling edge"),
                     ),
                     (
                         2,
-                        "CPOL 1, CPHA 0: clock idle high, read on the falling edge",
+                        tr("CPOL 1, CPHA 0: clock idle high, read on the falling edge"),
                     ),
                     (
                         3,
-                        "CPOL 1, CPHA 1: clock idle high, read on the rising edge",
+                        tr("CPOL 1, CPHA 1: clock idle high, read on the rising edge"),
                     ),
                 ] {
                     ui.radio_value(&mut s.mode, m, m.to_string())
@@ -546,13 +569,13 @@ fn spi_settings(
                 }
             });
             ui.end_row();
-            ui.label("Bit order:");
+            ui.label(tr("Bit order:"));
             ui.horizontal(|ui| {
-                ui.radio_value(&mut s.msb_first, true, "MSB first");
-                ui.radio_value(&mut s.msb_first, false, "LSB first");
+                ui.radio_value(&mut s.msb_first, true, tr("MSB first"));
+                ui.radio_value(&mut s.msb_first, false, tr("LSB first"));
             });
             ui.end_row();
-            ui.label("Word size:");
+            ui.label(tr("Word size:"));
             ui.add(
                 egui::DragValue::new(&mut s.word_bits)
                     .range(4..=16)
@@ -568,49 +591,49 @@ fn uart_settings(ui: &mut egui::Ui, label: &str, s: &mut uart::Settings) {
         .num_columns(2)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Baud:");
+            ui.label(tr("Baud:"));
             let text = if s.baud == 0 {
-                "Auto".to_owned()
+                tr("Auto").to_owned()
             } else {
                 s.baud.to_string()
             };
             // A submenu, not a ComboBox: a ComboBox opens a popup of its
             // own, and a click in it closes the Decode menu.
             ui.menu_button(format!("{text} ▸"), |ui| {
-                ui.selectable_value(&mut s.baud, 0, "Auto")
-                    .on_hover_text("Measured from the shortest pulse");
+                ui.selectable_value(&mut s.baud, 0, tr("Auto"))
+                    .on_hover_text(tr("Measured from the shortest pulse"));
                 ui.separator();
                 for b in uart::STANDARD_BAUDS {
                     ui.selectable_value(&mut s.baud, b, b.to_string());
                 }
             });
             ui.end_row();
-            ui.label("Data bits:");
+            ui.label(tr("Data bits:"));
             ui.horizontal(|ui| {
                 for b in 5..=9 {
                     ui.radio_value(&mut s.data_bits, b, b.to_string());
                 }
             });
             ui.end_row();
-            ui.label("Parity:");
+            ui.label(tr("Parity:"));
             ui.horizontal(|ui| {
                 for p in uart::Parity::ALL {
                     ui.radio_value(&mut s.parity, p, p.label());
                 }
             });
             ui.end_row();
-            ui.label("Stop bits:");
+            ui.label(tr("Stop bits:"));
             ui.horizontal(|ui| {
                 ui.radio_value(&mut s.stop_bits, 1, "1");
                 ui.radio_value(&mut s.stop_bits, 2, "2");
             });
             ui.end_row();
-            ui.label("Idle level:");
+            ui.label(tr("Idle level:"));
             ui.horizontal(|ui| {
-                ui.radio_value(&mut s.idle_low, false, "High")
-                    .on_hover_text("TTL serial of a microcontroller");
-                ui.radio_value(&mut s.idle_low, true, "Low (inverted)")
-                    .on_hover_text("RS-232 line levels (before the transceiver)");
+                ui.radio_value(&mut s.idle_low, false, tr("High"))
+                    .on_hover_text(tr("TTL serial of a microcontroller"));
+                ui.radio_value(&mut s.idle_low, true, tr("Low (inverted)"))
+                    .on_hover_text(tr("RS-232 line levels (before the transceiver)"));
             });
             ui.end_row();
         });
@@ -643,7 +666,7 @@ pub(super) fn frame_text(f: &Frame, radix: Radix) -> String {
     let nack = if f.ack == Some(false) { " N" } else { "" };
     match f.kind {
         FrameKind::Start { repeated: false } => "S".to_owned(),
-        FrameKind::Start { repeated: true } => "Sr".to_owned(),
+        FrameKind::Start { repeated: true } => tr("Sr").to_owned(),
         FrameKind::Stop => "P".to_owned(),
         FrameKind::Select { active: true } => "[".to_owned(),
         FrameKind::Select { active: false } => "]".to_owned(),
@@ -667,23 +690,23 @@ pub(super) fn frame_text(f: &Frame, radix: Radix) -> String {
 /// decimal and ASCII, the acknowledge, and the error.
 fn describe(f: &Frame) -> String {
     let value = || {
-        format!(
-            "{} (hex) = {} = '{}'",
-            word_text(f.value, f.bits, Radix::Hex),
-            f.value,
-            decode::ascii(f.value)
+        crate::trf!(
+            "{a0} (hex) = {a1} = '{a2}'",
+            a0 = word_text(f.value, f.bits, Radix::Hex),
+            a1 = f.value,
+            a2 = decode::ascii(f.value)
         )
     };
     let mut text = match f.kind {
-        FrameKind::Start { repeated: false } => "start".to_owned(),
-        FrameKind::Start { repeated: true } => "repeated start".to_owned(),
-        FrameKind::Stop => "stop".to_owned(),
-        FrameKind::Select { active: true } => "CS active (start of a selection)".to_owned(),
-        FrameKind::Select { active: false } => "CS released".to_owned(),
-        FrameKind::Address { read } => format!(
-            "address {} (hex), {}",
-            word_text(f.value, 7, Radix::Hex),
-            if read { "read" } else { "write" }
+        FrameKind::Start { repeated: false } => tr("start").to_owned(),
+        FrameKind::Start { repeated: true } => tr("repeated start").to_owned(),
+        FrameKind::Stop => tr("stop").to_owned(),
+        FrameKind::Select { active: true } => tr("CS active (start of a selection)").to_owned(),
+        FrameKind::Select { active: false } => tr("CS released").to_owned(),
+        FrameKind::Address { read } => crate::trf!(
+            "address {a0} (hex), {a1}",
+            a0 = word_text(f.value, 7, Radix::Hex),
+            a1 = if read { tr("read") } else { tr("write") }
         ),
         FrameKind::Data => format!("= {}", value()),
     };

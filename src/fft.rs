@@ -45,21 +45,25 @@ impl Window {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Rectangular => "Rectangular",
-            Self::Hanning => "Hanning",
-            Self::Hamming => "Hamming",
-            Self::BlackmanHarris => "Blackman-Harris",
-            Self::FlatTop => "Flat top",
+            Self::Rectangular => crate::i18n::tr("Rectangular"),
+            Self::Hanning => crate::i18n::tr("Hanning"),
+            Self::Hamming => crate::i18n::tr("Hamming"),
+            Self::BlackmanHarris => crate::i18n::tr("Blackman-Harris"),
+            Self::FlatTop => crate::i18n::tr("Flat top"),
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::Rectangular => "No window: transients, or a whole number of periods",
-            Self::Hanning => "General use with periodic signals",
-            Self::Hamming => "Like Hanning, slightly narrower peak",
-            Self::BlackmanHarris => "Low leakage: small harmonics next to a large peak",
-            Self::FlatTop => "Accurate amplitude, wide peak",
+            Self::Rectangular => {
+                crate::i18n::tr("No window: transients, or a whole number of periods")
+            }
+            Self::Hanning => crate::i18n::tr("General use with periodic signals"),
+            Self::Hamming => crate::i18n::tr("Like Hanning, slightly narrower peak"),
+            Self::BlackmanHarris => {
+                crate::i18n::tr("Low leakage: small harmonics next to a large peak")
+            }
+            Self::FlatTop => crate::i18n::tr("Accurate amplitude, wide peak"),
         }
     }
 

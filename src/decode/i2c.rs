@@ -9,6 +9,7 @@
 //!   (bit 0: 1 = read). 10-bit addresses are shown as two bytes.
 
 use super::{Decoded, Frame, FrameError, FrameKind, Logic};
+use crate::i18n::tr;
 
 /// Fewer samples per clock period than this: a warning.
 const MIN_SAMPLES_PER_PERIOD: f64 = 4.0;
@@ -57,11 +58,11 @@ enum Event {
 /// "100 kHz": a frequency in short.
 fn freq_text(f: f64) -> String {
     if f >= 1e6 {
-        format!("{:.3} MHz", f / 1e6)
+        crate::trf!("{a0} MHz", a0 = format!("{:.3}", f / 1e6))
     } else if f >= 1e3 {
-        format!("{:.1} kHz", f / 1e3)
+        crate::trf!("{a0} kHz", a0 = format!("{:.1}", f / 1e3))
     } else {
-        format!("{f:.0} Hz")
+        crate::trf!("{f} Hz", f = format!("{f:.0}"))
     }
 }
 
@@ -80,13 +81,10 @@ pub fn decode(sda: &Logic, scl: &Logic) -> Decoded {
             .flatten()
             .fold(0.0, f64::max);
         if step > 0.0 && p / step < MIN_SAMPLES_PER_PERIOD {
-            warnings.push(format!(
-                "only {:.1} samples per clock period: the bytes may be wrong (use a faster time base)",
-                p / step
-            ));
+            warnings.push(crate::trf!("only {a0} samples per clock period: the bytes may be wrong (use a faster time base)", a0 = format!("{:.1}", p / step)));
         }
     } else {
-        warnings.push("no clock: SCL does not change".to_owned());
+        warnings.push(tr("no clock: SCL does not change").to_owned());
     }
 
     // Start and stop: SDA changes while SCL is high. Bits: SCL rising.

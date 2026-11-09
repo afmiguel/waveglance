@@ -17,6 +17,7 @@
 //! new word.
 
 use super::{Decoded, Frame, FrameError, FrameKind, Logic};
+use crate::i18n::tr;
 
 /// SPI settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -75,11 +76,11 @@ fn period(samples: &[f64]) -> Option<f64> {
 
 fn freq_text(f: f64) -> String {
     if f >= 1e6 {
-        format!("{:.3} MHz", f / 1e6)
+        crate::trf!("{a0} MHz", a0 = format!("{:.3}", f / 1e6))
     } else if f >= 1e3 {
-        format!("{:.1} kHz", f / 1e3)
+        crate::trf!("{a0} kHz", a0 = format!("{:.1}", f / 1e3))
     } else {
-        format!("{f:.0} Hz")
+        crate::trf!("{f} Hz", f = format!("{f:.0}"))
     }
 }
 
@@ -93,17 +94,19 @@ pub fn decode(data: &Logic, sclk: &Logic, cs: Option<&Logic>, s: &Settings) -> D
     let period = period(&samples);
     let half = period.map_or(0.0, |p| p / 2.0);
     let mut warnings = Vec::new();
-    let mut title = format!(
-        "SCLK {}, mode {mode}, {}, {word_bits} bits",
-        period.map_or("?".to_owned(), |p| freq_text(1.0 / p)),
-        if s.msb_first {
-            "MSB first"
+    let mut title = crate::trf!(
+        "SCLK {a0}, mode {mode}, {a1}, {word_bits} bits",
+        a0 = period.map_or("?".to_owned(), |p| freq_text(1.0 / p)),
+        mode = mode,
+        a1 = if s.msb_first {
+            tr("MSB first")
         } else {
-            "LSB first"
-        }
+            tr("LSB first")
+        },
+        word_bits = word_bits
     );
     if cs.is_none() {
-        title.push_str(", no CS");
+        title.push_str(tr(", no CS"));
     }
     match period {
         Some(p) => {
@@ -112,13 +115,10 @@ pub fn decode(data: &Logic, sclk: &Logic, cs: Option<&Logic>, s: &Settings) -> D
                 .flatten()
                 .fold(0.0, f64::max);
             if step > 0.0 && p / step < MIN_SAMPLES_PER_PERIOD {
-                warnings.push(format!(
-                    "only {:.1} samples per clock period: the words may be wrong (use a faster time base)",
-                    p / step
-                ));
+                warnings.push(crate::trf!("only {a0} samples per clock period: the words may be wrong (use a faster time base)", a0 = format!("{:.1}", p / step)));
             }
         }
-        None => warnings.push("no clock: SCLK does not change".to_owned()),
+        None => warnings.push(tr("no clock: SCLK does not change").to_owned()),
     }
 
     // The selections: (start, end) times where CS is active. Without CS,

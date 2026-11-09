@@ -33,15 +33,15 @@ impl ScopeApp {
                 // A bus: its width; a click hides or shows it, a right
                 // click chooses how the values are written.
                 if let Some(bits) = buses[i] {
-                    let text = format!("{bits}-bit bus · {}", self.bus_radix.label());
+                    let text = crate::trf!("{bits}-bit bus · {a0}", bits = bits, a0 = self.bus_radix.label());
                     let r = channel_button(ui, name, &text, color, self.visible[i]).on_hover_text(
-                        "Bus of digital signals. Click to hide or show it; right click (or long press): values in Hex, Dec, Bin or ASCII.",
+                        tr("Bus of digital signals. Click to hide or show it; right click (or long press): values in Hex, Dec, Bin or ASCII."),
                     );
                     if r.clicked() {
                         self.visible[i] = !self.visible[i];
                     }
                     r.context_menu(|ui| {
-                        ui.label("Bus values:");
+                        ui.label(tr("Bus values:"));
                         for radix in Radix::ALL {
                             if ui.radio_value(&mut self.bus_radix, radix, radix.label()).clicked() {
                                 ui.close();
@@ -52,8 +52,8 @@ impl ScopeApp {
                 }
                 // A digital trace: no V/div; a click hides or shows it.
                 if *unit == TraceUnit::Logic {
-                    if channel_button(ui, name, "logic", color, self.visible[i])
-                        .on_hover_text("Digital signal (0/1). Click to hide or show it.")
+                    if channel_button(ui, name, tr("logic"), color, self.visible[i])
+                        .on_hover_text(tr("Digital signal (0/1). Click to hide or show it."))
                         .clicked()
                     {
                         self.visible[i] = !self.visible[i];
@@ -70,10 +70,7 @@ impl ScopeApp {
                 let star = if shown == vdiv { "" } else { "*" };
                 let text = format!("{}/div{star}{probe}", si(shown, unit));
                 let response = channel_button(ui, name, &text, color, self.visible[i]).on_hover_text(
-                    format!(
-                        "Mouse wheel: {unit}/div of {name} (1-2-5 steps; switches Y to Div). In the file: {}/div.",
-                        si(vdiv, unit)
-                    ),
+                    crate::trf!("Mouse wheel: {unit}/div of {name} (1-2-5 steps; switches Y to Div). In the file: {a0}/div.", unit = unit, name = name, a0 = si(vdiv, unit)),
                 );
                 if response.clicked() {
                     self.visible[i] = !self.visible[i];
@@ -104,7 +101,7 @@ impl ScopeApp {
             let Some(w) = &self.waveform else { return };
             let mode = match w.acquisition {
                 Acquisition::RealTime { sample_rate_hz } => format!("{}Sa/s", si_bare(sample_rate_hz)),
-                Acquisition::Equivalent { frames } => format!("ETS · frame 1 of {frames}"),
+                Acquisition::Equivalent { frames } => crate::trf!("ETS · frame 1 of {frames}", frames = frames),
             };
             readout(ui, "MODE", Some(mode), palette::fg_dim());
             if let Some(t) = &w.trigger {
@@ -137,7 +134,7 @@ impl ScopeApp {
                     )),
                     palette::fg_dim(),
                 )
-                .on_hover_text("Search menu: [ and ] go to the previous and next event");
+                .on_hover_text(tr("Search menu: [ and ] go to the previous and next event"));
             }
             // Reference: a click hides or shows it, like a channel.
             if let Some((name, _)) = &self.reference {
@@ -154,7 +151,7 @@ impl ScopeApp {
                             .stroke(egui::Stroke::new(1.0, color))
                             .corner_radius(3),
                     )
-                    .on_hover_text("Reference waveform (File ▾ → Open reference…). Click to hide or show it.")
+                    .on_hover_text(tr("Reference waveform (File ▾ → Open reference…). Click to hide or show it."))
                     .clicked()
                 {
                     self.show_reference = !self.show_reference;
@@ -168,8 +165,8 @@ impl ScopeApp {
                 .map(|t| t.label.as_str())
                 .collect();
             if !clipped.is_empty() {
-                ui.label(RichText::new(format!("⚠ {} clipped", clipped.join(", "))).color(palette::error()))
-                    .on_hover_text("The signal reaches the limit of the input range: amplitude measurements are marked with \"?\"");
+                ui.label(RichText::new(crate::trf!("⚠ {a0} clipped", a0 = clipped.join(", "))).color(palette::error()))
+                    .on_hover_text(tr("The signal reaches the limit of the input range: amplitude measurements are marked with \"?\""));
             }
             for warning in &w.warnings {
                 ui.label(RichText::new(format!("⚠ {warning}")).color(palette::warn_text()));
@@ -184,12 +181,12 @@ impl ScopeApp {
         let record = self.waveform.as_ref()?.time_span()?;
         let screen = || {
             self.last_transform.as_ref().map_or_else(
-                || (record.clone(), "Record"),
-                |t| (t.bounds().range_x(), "Screen"),
+                || (record.clone(), tr("Record")),
+                |t| (t.bounds().range_x(), tr("Screen")),
             )
         };
         Some(match self.measure.window {
-            measure::Window::Record => (record.clone(), "Record"),
+            measure::Window::Record => (record.clone(), tr("Record")),
             measure::Window::Screen => screen(),
             measure::Window::Cursors if self.cursors.mode.shows_time() => {
                 let [a, b] = self.cursors.t;
@@ -240,11 +237,14 @@ impl ScopeApp {
             return;
         };
         ui.label(
-            RichText::new(format!("Measurements · {window_name}"))
-                .small()
-                .color(palette::hint()),
+            RichText::new(crate::trf!(
+                "Measurements · {window_name}",
+                window_name = window_name
+            ))
+            .small()
+            .color(palette::hint()),
         )
-        .on_hover_text("The samples measured: Measure ▾ → Samples");
+        .on_hover_text(tr("The samples measured: Measure ▾ → Samples"));
         for (name, ch, color, clipped) in self.measured_channels(&window) {
             let r = self.measure_cached(&name, &ch, &window);
             let ch = &*ch;
@@ -262,7 +262,7 @@ impl ScopeApp {
                     // are not reliable (the real Vpp is larger).
                     if clipped && m.unit() == Unit::Volt {
                         item(ui, m.label(), &format!("?{value}"), palette::warn()).on_hover_text(
-                            format!("{}\n⚠ {name} is clipped in this window: the real value can be larger", m.description()),
+                            crate::trf!("{a0}\n⚠ {name} is clipped in this window: the real value can be larger", a0 = m.description(), name = name),
                         );
                     } else {
                         item(ui, m.label(), &value, color).on_hover_text(m.description());
@@ -297,8 +297,9 @@ impl ScopeApp {
                 item(
                     ui,
                     "1/ΔT",
-                    &c.frequency()
-                        .map_or("—".to_owned(), |f| fmt_sig(f, "Hz", READOUT_DIGITS, 0.0)),
+                    &c.frequency().map_or("—".to_owned(), |f| {
+                        fmt_sig(f, tr("Hz"), READOUT_DIGITS, 0.0)
+                    }),
                     color,
                 );
                 for (i, ch) in self.traces().iter().enumerate() {
@@ -435,9 +436,9 @@ pub(super) fn channel_button(
     shown: bool,
 ) -> egui::Response {
     let (shown_color, tip) = if shown {
-        (color, "Click to hide this channel")
+        (color, tr("Click to hide this channel"))
     } else {
-        (palette::off(), "Click to show this channel")
+        (palette::off(), tr("Click to show this channel"))
     };
     // The name as a filled tag, then the setting.
     let font = egui::FontId::monospace(egui::TextStyle::Monospace.resolve(ui.style()).size);
@@ -485,9 +486,9 @@ pub(super) fn stats_table(
             let head = |ui: &mut egui::Ui, t: &str| {
                 ui.label(RichText::new(t).small().color(palette::hint()));
             };
-            head(ui, &format!("{name} per cycle"));
+            head(ui, &crate::trf!("{name} per cycle", name = name));
             for t in ["mean", "min", "max", "σ", "n"] {
-                head(ui, t);
+                head(ui, tr(t));
             }
             ui.end_row();
             for (m, st) in rows {
@@ -511,7 +512,7 @@ pub(super) fn format_spread(m: Measurement, v: f64, ch: &Trace) -> String {
     let dt = ch.time_step().unwrap_or(0.0);
     match m.unit() {
         Unit::Second => fmt_sig(v, "s", 3, dt / 10.0),
-        Unit::Hertz => fmt_sig(v, "Hz", 3, 0.0),
+        Unit::Hertz => fmt_sig(v, tr("Hz"), 3, 0.0),
         Unit::Percent => format!("{v:.2} %"),
         Unit::Volt => fmt_sig(v, ch.unit.symbol(), 3, 0.0),
     }
@@ -542,7 +543,7 @@ pub(super) fn format_measurement(m: Measurement, value: Option<f64>, ch: &Trace)
             format!("<{}", fmt_sig(2.0 * dt, "s", 3, 0.0))
         }
         Unit::Second => fmt_sig(v, "s", READOUT_DIGITS, dt / 10.0),
-        Unit::Hertz => fmt_sig(v, "Hz", READOUT_DIGITS, 0.0),
+        Unit::Hertz => fmt_sig(v, tr("Hz"), READOUT_DIGITS, 0.0),
         Unit::Percent => format!("{v:.1} %"),
     }
 }

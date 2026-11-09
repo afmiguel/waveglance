@@ -17,6 +17,7 @@ pub mod i2c;
 pub mod spi;
 pub mod uart;
 
+use crate::i18n::tr;
 use crate::model::Trace;
 
 /// A trace as a logic signal: the level at the start and the times where
@@ -141,9 +142,9 @@ pub enum FrameError {
 impl FrameError {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Parity => "parity error",
-            Self::Framing => "framing error (stop bit is 0)",
-            Self::Incomplete => "incomplete byte (cut by a start or stop)",
+            Self::Parity => crate::i18n::tr("parity error"),
+            Self::Framing => crate::i18n::tr("framing error (stop bit is 0)"),
+            Self::Incomplete => crate::i18n::tr("incomplete byte (cut by a start or stop)"),
         }
     }
 }
@@ -198,10 +199,10 @@ impl Protocol {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Off => "Off",
-            Self::Uart => "UART",
-            Self::I2c => "I2C",
-            Self::Spi => "SPI",
+            Self::Off => crate::i18n::tr("Off"),
+            Self::Uart => crate::i18n::tr("UART"),
+            Self::I2c => crate::i18n::tr("I2C"),
+            Self::Spi => crate::i18n::tr("SPI"),
         }
     }
 
@@ -281,11 +282,11 @@ pub fn decode(
                 spi::decode(&logic, &clk, cs.as_ref(), &settings.spi)
             }
             None => Decoded {
-                title: "no clock line".to_owned(),
+                title: tr("no clock line").to_owned(),
                 frames: Vec::new(),
-                warnings: vec![format!(
-                    "choose the clock line ({}) in the ▸ settings",
-                    if settings.protocol == Protocol::I2c {
+                warnings: vec![crate::trf!(
+                    "choose the clock line ({a0}) in the ▸ settings",
+                    a0 = if settings.protocol == Protocol::I2c {
                         "SCL"
                     } else {
                         "SCLK"

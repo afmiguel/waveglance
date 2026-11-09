@@ -5,6 +5,24 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.34.0 — 2026-11-09
+
+The interface in Brazilian Portuguese.
+
+- **Language:** English or Português (Brasil). At start the language of the
+  system (desktop) or of the browser (web) is used; the 🌐 button on the
+  toolbar changes it at once, and the choice is saved.
+- Translated: menus, hints, the welcome screen and the examples, the Help,
+  the readouts and measurement names, the axes, the FFT, the decoder menu,
+  rows, titles and warnings, and the error messages of the app. The reasons
+  given by the file readers (for a damaged file) stay in English.
+- The English text in the code is the key (`tr`, `trf!`); the Portuguese
+  texts are in `src/i18n/pt.rs`, and a test fails if a text has no
+  translation or a translation loses a `{value}`.
+- Texts brought up to date with the Digilent format: the Help, the welcome
+  screen, the File menu hint and the drop hint now list it; the open dialog
+  also offers `.txt`.
+
 ## 0.33.0 — 2026-11-09
 
 Digilent WaveForms files (Analog Discovery 1, 2 and 3, Electronics Explorer,

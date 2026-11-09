@@ -11,7 +11,11 @@ impl ScopeApp {
         let text = export::csv(w, name, VERSION);
         let file = format!("{}.csv", export::stem(name));
         if let Err(e) = export::save(&file, text.as_bytes(), "text/csv", ("CSV", "csv")) {
-            self.error = Some(format!("Could not save {file}: {e}."));
+            self.error = Some(crate::trf!(
+                "Could not save {file}: {e}.",
+                file = file,
+                e = e
+            ));
         }
     }
 
@@ -75,13 +79,16 @@ impl ScopeApp {
                 &format!("{base}.png"),
                 &png,
                 "image/png",
-                ("PNG image", "png"),
+                (tr("PNG image"), "png"),
             )
             .map(|_| ()),
             ShotPurpose::Print => export::print_png(&png),
         });
         if let Err(e) = result {
-            self.error = Some(format!("Could not save or print the picture: {e}."));
+            self.error = Some(crate::trf!(
+                "Could not save or print the picture: {e}.",
+                e = e
+            ));
         }
     }
 

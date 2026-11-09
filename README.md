@@ -24,6 +24,9 @@ The files you open are read in your browser: nothing is uploaded.
   `.wav`, Keysight/Agilent and Rigol `.bin`, Rigol `.wfm`, Digilent WaveForms
   (Analog Discovery) `.csv`/`.txt`, VCD and CSV (see
   [Supported files](#supported-files)).
+- **English or Brazilian Portuguese**: the language of the system or browser
+  is used at start; the 🌐 button on the toolbar changes it (the choice is
+  saved).
 - **A scope screen**: 8 divisions with each channel at its own V/div and
   ground position (**Div**), or one axis in volts (**Volts**). Channel, time
   base, mode, trigger and record length readouts at the bottom (OSD).
@@ -388,6 +391,11 @@ this on each push to `main`.
 | `src/measure.rs`, `src/fft.rs`, `src/cursors.rs` | Measurements, spectrum, cursors (work on any trace) |
 | `src/decode/` | Protocol decoders: shared logic-level code (`mod.rs`) and one file per protocol (`uart.rs`, `i2c.rs`, `spi.rs`) |
 | `src/export.rs`, `src/examples.rs`, `src/palette.rs` | CSV/PNG/print, built-in examples, colours |
+
+To translate a text: the English text in the code is the key, in
+`tr("…")` or `trf!("… {name} …", name = value)`, and its Portuguese text is in
+`src/i18n/pt.rs`. `cargo test` fails if a text in `tr`/`trf!` has no
+Portuguese entry.
 
 To add a file format: write a module in `src/formats/` that implements
 `Format` (`name`, `probe`, `read` → `Capture`), add it to `FORMATS`, and add

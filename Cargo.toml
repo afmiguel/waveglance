@@ -1,6 +1,6 @@
 [package]
 name = "waveglance"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/afmiguel/waveglance"
@@ -30,11 +30,14 @@ log = "=0.4.35"
 png = "=0.18.1"
 rfd = "=0.17.2"
 serde = { version = "=1.0.229", features = ["derive"] }
+# The language of the system or browser, for the interface language.
+sys-locale = "=0.3.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "=0.11.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+sys-locale = { version = "=0.3.2", features = ["js"] }
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "=0.4.80"
 js-sys = "=0.3.107"

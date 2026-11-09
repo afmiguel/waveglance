@@ -7,6 +7,7 @@
 //! counted from the falling edge of the start bit.
 
 use super::{Decoded, Frame, FrameError, Logic};
+use crate::i18n::tr;
 
 /// Parity bit.
 #[derive(
@@ -24,9 +25,9 @@ impl Parity {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::None => "None",
-            Self::Even => "Even",
-            Self::Odd => "Odd",
+            Self::None => crate::i18n::tr("None"),
+            Self::Even => crate::i18n::tr("Even"),
+            Self::Odd => crate::i18n::tr("Odd"),
         }
     }
 
@@ -116,8 +117,9 @@ pub fn decode(logic: &Logic, s: &Settings) -> Decoded {
         if let Some(b) = b
             && !STANDARD_BAUDS.contains(&(b as u32))
         {
-            warnings.push(format!(
-                "measured {b:.0} baud, not a standard rate: set the baud rate if the bytes are wrong"
+            warnings.push(crate::trf!(
+                "measured {b} baud, not a standard rate: set the baud rate if the bytes are wrong",
+                b = format!("{b:.0}")
             ));
         }
         b
@@ -125,16 +127,16 @@ pub fn decode(logic: &Logic, s: &Settings) -> Decoded {
     let mut title = format!(
         "{}{} {}{}{}",
         baud.map_or("?".to_owned(), |b| format!("{b:.0}")),
-        if s.baud == 0 { " (auto)" } else { "" },
+        if s.baud == 0 { tr(" (auto)") } else { "" },
         data_bits,
         s.parity.letter(),
         stop_bits
     );
     if s.idle_low {
-        title.push_str(" inverted");
+        title.push_str(tr(" inverted"));
     }
     let Some(baud) = baud else {
-        warnings.push("no edges: the signal does not change".to_owned());
+        warnings.push(tr("no edges: the signal does not change").to_owned());
         return Decoded {
             title,
             frames: Vec::new(),
@@ -149,9 +151,9 @@ pub fn decode(logic: &Logic, s: &Settings) -> Decoded {
         && step > 0.0
         && bit / step < MIN_SAMPLES_PER_BIT
     {
-        warnings.push(format!(
-            "only {:.1} samples per bit: the bytes may be wrong (use a faster time base)",
-            bit / step
+        warnings.push(crate::trf!(
+            "only {a0} samples per bit: the bytes may be wrong (use a faster time base)",
+            a0 = format!("{:.1}", bit / step)
         ));
     }
 

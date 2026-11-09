@@ -73,42 +73,42 @@ impl Measurement {
     /// Short label for the readout.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Frequency => "Freq",
-            Self::Period => "Period",
-            Self::Vpp => "Vpp",
-            Self::Vmax => "Vmax",
-            Self::Vmin => "Vmin",
-            Self::Vtop => "Vtop",
-            Self::Vbase => "Vbase",
-            Self::Vamp => "Vamp",
-            Self::Mean => "Mean",
-            Self::Rms => "RMS",
-            Self::RiseTime => "Rise",
-            Self::FallTime => "Fall",
-            Self::PositiveWidth => "+Width",
-            Self::NegativeWidth => "−Width",
-            Self::DutyCycle => "+Duty",
+            Self::Frequency => crate::i18n::tr("Freq"),
+            Self::Period => crate::i18n::tr("Period"),
+            Self::Vpp => crate::i18n::tr("Vpp"),
+            Self::Vmax => crate::i18n::tr("Vmax"),
+            Self::Vmin => crate::i18n::tr("Vmin"),
+            Self::Vtop => crate::i18n::tr("Vtop"),
+            Self::Vbase => crate::i18n::tr("Vbase"),
+            Self::Vamp => crate::i18n::tr("Vamp"),
+            Self::Mean => crate::i18n::tr("Mean"),
+            Self::Rms => crate::i18n::tr("RMS"),
+            Self::RiseTime => crate::i18n::tr("Rise"),
+            Self::FallTime => crate::i18n::tr("Fall"),
+            Self::PositiveWidth => crate::i18n::tr("+Width"),
+            Self::NegativeWidth => crate::i18n::tr("−Width"),
+            Self::DutyCycle => crate::i18n::tr("+Duty"),
         }
     }
 
     /// Description for the menu.
     pub fn description(self) -> &'static str {
         match self {
-            Self::Frequency => "Frequency: 1 / period",
-            Self::Period => "Period: mean time between rising edges",
-            Self::Vpp => "Peak-to-peak voltage: Vmax − Vmin",
-            Self::Vmax => "Highest sample",
-            Self::Vmin => "Lowest sample",
-            Self::Vtop => "Top level (most common high level)",
-            Self::Vbase => "Base level (most common low level)",
-            Self::Vamp => "Amplitude: Vtop − Vbase",
-            Self::Mean => "Mean of the samples",
-            Self::Rms => "RMS of the samples (AC + DC)",
-            Self::RiseTime => "Rise time, 10% to 90%",
-            Self::FallTime => "Fall time, 90% to 10%",
-            Self::PositiveWidth => "Positive pulse width, at 50%",
-            Self::NegativeWidth => "Negative pulse width, at 50%",
-            Self::DutyCycle => "Positive duty cycle: +Width / period",
+            Self::Frequency => crate::i18n::tr("Frequency: 1 / period"),
+            Self::Period => crate::i18n::tr("Period: mean time between rising edges"),
+            Self::Vpp => crate::i18n::tr("Peak-to-peak voltage: Vmax − Vmin"),
+            Self::Vmax => crate::i18n::tr("Highest sample"),
+            Self::Vmin => crate::i18n::tr("Lowest sample"),
+            Self::Vtop => crate::i18n::tr("Top level (most common high level)"),
+            Self::Vbase => crate::i18n::tr("Base level (most common low level)"),
+            Self::Vamp => crate::i18n::tr("Amplitude: Vtop − Vbase"),
+            Self::Mean => crate::i18n::tr("Mean of the samples"),
+            Self::Rms => crate::i18n::tr("RMS of the samples (AC + DC)"),
+            Self::RiseTime => crate::i18n::tr("Rise time, 10% to 90%"),
+            Self::FallTime => crate::i18n::tr("Fall time, 90% to 10%"),
+            Self::PositiveWidth => crate::i18n::tr("Positive pulse width, at 50%"),
+            Self::NegativeWidth => crate::i18n::tr("Negative pulse width, at 50%"),
+            Self::DutyCycle => crate::i18n::tr("Positive duty cycle: +Width / period"),
         }
     }
 
@@ -143,9 +143,9 @@ impl Window {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Screen => "Screen",
-            Self::Record => "Record",
-            Self::Cursors => "T1–T2",
+            Self::Screen => crate::i18n::tr("Screen"),
+            Self::Record => crate::i18n::tr("Record"),
+            Self::Cursors => crate::i18n::tr("T1–T2"),
         }
     }
 }
@@ -434,9 +434,9 @@ impl EventKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Rising => "Rising edges",
-            Self::Falling => "Falling edges",
-            Self::Glitch => "Glitches",
+            Self::Rising => crate::i18n::tr("Rising edges"),
+            Self::Falling => crate::i18n::tr("Falling edges"),
+            Self::Glitch => crate::i18n::tr("Glitches"),
         }
     }
 }

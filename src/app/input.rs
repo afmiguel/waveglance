@@ -70,7 +70,7 @@ impl ScopeApp {
             return;
         };
         let name = file.path().file_name().map_or_else(
-            || "dropped file".to_owned(),
+            || tr("dropped file").to_owned(),
             |n| n.to_string_lossy().into_owned(),
         );
 
@@ -116,13 +116,13 @@ impl ScopeApp {
             let _ = ctx;
             let picked = rfd::FileDialog::new()
                 .add_filter(
-                    "Waveform (.wav, .bin, .wfm, .vcd, .csv)",
+                    tr("Waveform (.wav, .bin, .wfm, .vcd, .csv, .txt)"),
                     &[
                         "wav", "WAV", "bin", "BIN", "wfm", "WFM", "vcd", "VCD", "csv", "CSV",
                         "txt", "TXT",
                     ],
                 )
-                .add_filter("All files", &["*"])
+                .add_filter(tr("All files"), &["*"])
                 .pick_file();
             if let Some(path) = picked {
                 let name = path
@@ -139,13 +139,13 @@ impl ScopeApp {
             wasm_bindgen_futures::spawn_local(async move {
                 let picked = rfd::AsyncFileDialog::new()
                     .add_filter(
-                        "Waveform (.wav, .bin, .wfm, .vcd, .csv)",
+                        tr("Waveform (.wav, .bin, .wfm, .vcd, .csv, .txt)"),
                         &[
                             "wav", "WAV", "bin", "BIN", "wfm", "WFM", "vcd", "VCD", "csv", "CSV",
                             "txt", "TXT",
                         ],
                     )
-                    .add_filter("All files", &["*"])
+                    .add_filter(tr("All files"), &["*"])
                     .pick_file()
                     .await;
                 if let Some(file) = picked {
