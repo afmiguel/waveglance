@@ -5,6 +5,31 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.33.0 — 2026-11-09
+
+Digilent WaveForms files (Analog Discovery 1, 2 and 3, Electronics Explorer,
+ADP).
+
+- **New format: Digilent WaveForms exports** (`.csv` with commas, `.txt`
+  with tabs, `;` with decimal commas), from File → Export of the
+  Oscilloscope and of the Logic Analyzer. Found from the
+  `#Digilent WaveForms` header, which also gives the device name, the sample
+  rate, the trigger and, per channel, V/div, offset and attenuation.
+  - Logic Analyzer: `0`/`1` columns are digital lanes, ready for the UART,
+    I2C and SPI decoders; bus and interpreter columns (`hFFF`, numbers)
+    are value lanes; `X` is "no value".
+  - Uneven times are kept as they are; even times are not stored, so long
+    Record-mode files stay small in memory.
+  - Before, these files opened as a plain CSV: wrong device name, logic
+    lines as analog traces, bus columns dropped, `.txt` not recognised.
+- **Large text files:** a text file over 256 MB (a Record-mode export, a long
+  CSV or VCD) is no longer refused: its first 256 MB are read, cut at a line,
+  with a warning up to which time. Binary files over the limit are still
+  refused; on the desktop only the part that is read is loaded.
+- **Examples:** "Digilent WaveForms" in File → Open example: an RC filter on
+  the Oscilloscope, and an I2C sensor read with a UART message on the Logic
+  Analyzer (made by `scripts/make-digilent-examples.py`).
+
 ## 0.32.0 — 2026-11-09
 
 Desktop programs that look and behave like real applications, and a safety

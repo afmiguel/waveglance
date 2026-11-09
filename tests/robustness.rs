@@ -103,7 +103,7 @@ fn changed_bytes_do_not_crash() {
 fn random_bytes_do_not_crash() {
     let mut rng = Rng(42);
     // Random data behind each format's signature, so the reader is chosen.
-    let prefixes: [&[u8]; 8] = [
+    let prefixes: [&[u8]; 10] = [
         b"",
         b"AG10",
         b"AG01",
@@ -112,6 +112,8 @@ fn random_bytes_do_not_crash() {
         b"Time,CH1\n",
         b"\x00\x00\x00\x32",
         b"\xa5\xa5\xa4\x01",
+        b"#Digilent WaveForms Oscilloscope Acquisition\n#Sample rate: 1e+06Hz\nTime (s),Channel 1 (V)\n",
+        b"#Digilent WaveForms Logic Analyzer Acquisition\nTime (s)\tDIO 0\tBus\n",
     ];
     for prefix in prefixes {
         for len in [0usize, 1, 7, 64, 300, 2000, 15000, 70000] {

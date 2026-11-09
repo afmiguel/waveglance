@@ -389,6 +389,9 @@ pub struct ScopeApp {
     analog_span: Option<(f64, f64)>,
     /// A file waiting for the user to choose its format.
     format_choice: Option<FormatChoice>,
+    /// The file being opened is over the size limit: only its start is
+    /// read, and the capture gets a warning.
+    file_cut: bool,
     /// The last file that could not be read, for the "Open as…" button of
     /// the error banner: (target, name, bytes).
     failed_file: Option<(LoadTarget, String, Vec<u8>)>,
@@ -475,6 +478,7 @@ impl ScopeApp {
             vdiv_wheel: 0.0,
             tab_presses: 0,
             format_choice: None,
+            file_cut: false,
             analog_span: None,
             math_cache: RefCell::new(None),
             measure_cache: RefCell::new(Vec::new()),
@@ -550,10 +554,17 @@ impl ScopeApp {
     /// Find the format of a file and read it. If the format is not certain,
     /// the "Which format is this file?" window asks the user.
     fn open_bytes(&mut self, target: LoadTarget, name: String, bytes: &[u8]) {
-        if let Err(e) = formats::check_size(bytes.len()) {
-            self.report_open_error(&name, &e.to_string());
-            return;
-        }
+        // A text file over the size limit: only its start is read.
+        let bytes = match formats::within_limit(bytes) {
+            Ok((part, cut)) => {
+                self.file_cut = cut;
+                part
+            }
+            Err(e) => {
+                self.report_open_error(&name, &e.to_string());
+                return;
+            }
+        };
         let decision = match guarded(&name, || formats::decide(bytes)) {
             Ok(d) => d,
             Err(e) => {
@@ -589,8 +600,13 @@ impl ScopeApp {
         bytes: &[u8],
         format: &'static dyn formats::Format,
     ) {
-        let result =
+        let mut result =
             guarded(&name, || format.read(bytes)).unwrap_or_else(|e| Err(formats::ReadError(e)));
+        if self.file_cut
+            && let Ok(w) = &mut result
+        {
+            formats::note_cut(w);
+        }
         match result {
             Ok(w) if target == LoadTarget::Reference => {
                 self.reference = Some((name, w));

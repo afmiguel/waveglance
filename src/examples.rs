@@ -8,6 +8,8 @@
 //!   see `assets/examples/rigol/README.md`.
 //! - VCD files made by `scripts/make-vcd-examples.py` for this project:
 //!   see `assets/examples/vcd/README.md`.
+//! - Digilent WaveForms files made by `scripts/make-digilent-examples.py`
+//!   for this project: see `assets/examples/digilent/README.md`.
 
 /// One built-in example file.
 pub struct Example {
@@ -68,6 +70,11 @@ pub const GROUPS: &[Group] = &[
     Group {
         name: "Logic (VCD)",
         credit: "Made for this viewer by scripts/make-vcd-examples.py (not captures)",
+    },
+    Group {
+        name: "Digilent WaveForms",
+        credit: "In the export format of Digilent WaveForms (Analog Discovery); made for \
+                 this viewer by scripts/make-digilent-examples.py (not captures)",
     },
 ];
 
@@ -254,6 +261,26 @@ pub const EXAMPLES: &[Example] = &[
         file: "example-vcd-spi-analog.vcd",
         bytes: include_bytes!("../assets/examples/vcd/spi-analog.vcd"),
     },
+    Example {
+        group: "Digilent WaveForms",
+        label: "Oscilloscope: RC filter step response",
+        about: "Analog Discovery 3, Oscilloscope export (.csv): the Wavegen makes a 1 kHz \
+                square wave, 0 to 3.3 V (CH1), into an RC low-pass filter of 100 us \
+                (CH2). Try Measure ▾ for the rise time of CH2, or the time cursors at \
+                63 % of the step.",
+        file: "example-digilent-scope-rc-filter.csv",
+        bytes: include_bytes!("../assets/examples/digilent/scope-rc-filter.csv"),
+    },
+    Example {
+        group: "Digilent WaveForms",
+        label: "Logic Analyzer: I2C sensor and UART",
+        about: "Analog Discovery 3, Logic Analyzer export (.csv), 2 MHz: a microcontroller \
+                reads a temperature sensor at 0x48 on I2C (SCL, SDA, 100 kHz) and prints \
+                \"T=25.5C\" on TX (115200 baud). In Decode ▾, check SDA (I2C, SCL as \
+                clock) and TX (UART); Show ASCII to read the text.",
+        file: "example-digilent-logic-i2c-uart.csv",
+        bytes: include_bytes!("../assets/examples/digilent/logic-i2c-uart.csv"),
+    },
 ];
 
 #[cfg(test)]
@@ -386,6 +413,25 @@ mod tests {
             spi_words("spi-analog", "CH1", "CH2", None),
             [0x9F, 0x03, 0x00, 0x01, 0x00]
         );
+    }
+
+    #[test]
+    fn digilent_examples() {
+        let open = |part: &str| {
+            let e = EXAMPLES.iter().find(|e| e.file.contains(part)).unwrap();
+            crate::formats::open(e.bytes).unwrap()
+        };
+        let w = open("digilent-scope");
+        assert_eq!(w.source.title(), "Digilent Discovery3");
+        assert_eq!(w.record_length, 8192);
+        assert_eq!(w.trace("CH2").unwrap().display.per_div, 1.0);
+        let w = open("digilent-logic");
+        assert!(w.traces.iter().all(|t| t.is_digital()));
+        assert_eq!(
+            i2c_text("digilent-logic", "SDA", "SCL"),
+            "S W48 00 Sr R48 19 80N P"
+        );
+        assert_eq!(decode_text("digilent-logic", "TX"), "T=25.5C\r\n");
     }
 
     #[test]

@@ -31,8 +31,8 @@ impl ScopeApp {
                 .show(ui, |ui| {
                     ui.label(
                         "A quick look at oscilloscope and logic analyzer files: FNIRSI DPOX180H and \
-                         1013D/1014D (.wav), Keysight/Agilent (.bin), Rigol (.bin, .wfm), VCD, and CSV \
-                         files from any oscilloscope. Measurements, cursors, FFT, Math, search, and \
+                         1013D/1014D (.wav), Keysight/Agilent (.bin), Rigol (.bin, .wfm), Digilent WaveForms \
+                         (Analog Discovery), VCD, and CSV files from any oscilloscope. Measurements, cursors, FFT, Math, search, and \
                          UART, I2C and SPI decoders. The files are read on this device: nothing is \
                          uploaded.",
                     );

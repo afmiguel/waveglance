@@ -1,6 +1,6 @@
 [package]
 name = "waveglance"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/afmiguel/waveglance"
@@ -8,7 +8,7 @@ homepage = "https://afmiguel.github.io/waveglance/"
 readme = "README.md"
 keywords = ["oscilloscope", "logic-analyzer", "waveform", "vcd", "decoder"]
 categories = ["science", "visualization", "embedded"]
-description = "Viewer for oscilloscope and logic analyzer files (FNIRSI, Keysight, Rigol, VCD, CSV), with measurements, FFT and UART/I2C/SPI decoders"
+description = "Viewer for oscilloscope and logic analyzer files (FNIRSI, Keysight, Rigol, Digilent, VCD, CSV), with measurements, FFT and UART/I2C/SPI decoders"
 
 [lib]
 # cdylib: the WebAssembly build (Trunk) starts from lib.rs.

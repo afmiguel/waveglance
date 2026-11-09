@@ -6,6 +6,7 @@
 //! [`open`] tries the formats from the most to the least sure.
 
 pub mod csv;
+pub mod digilent;
 pub mod fnirsi_1013d;
 pub mod fnirsi_dpox;
 pub mod keysight_bin;
@@ -60,6 +61,7 @@ pub static FORMATS: &[&dyn Format] = &[
     &keysight_bin::KeysightBinFormat,
     &rigol_wfm::RigolWfmFormat,
     &vcd::VcdFormat,
+    &digilent::DigilentFormat,
     &csv::CsvFormat,
 ];
 
@@ -103,11 +105,16 @@ pub fn decide(bytes: &[u8]) -> Decision {
 /// # Errors
 /// A [`ReadError`]: the error of the most likely format, or "unknown file".
 pub fn open(bytes: &[u8]) -> Result<Capture, ReadError> {
-    check_size(bytes.len())?;
+    let (bytes, cut) = within_limit(bytes)?;
     let mut first_error = None;
     for (format, _) in detect(bytes) {
         match format.read(bytes) {
-            Ok(capture) => return Ok(capture),
+            Ok(mut capture) => {
+                if cut {
+                    note_cut(&mut capture);
+                }
+                return Ok(capture);
+            }
             Err(e) => {
                 first_error.get_or_insert(e);
             }
@@ -141,6 +148,63 @@ pub fn check_size(len: usize) -> Result<(), ReadError> {
         )));
     }
     Ok(())
+}
+
+/// Bytes looked at to tell a text file from a binary one.
+const TEXT_PROBE: usize = 4096;
+
+/// True if `head` (the start of a file) looks like text: no NUL bytes and
+/// only a few control characters.
+pub fn looks_like_text(head: &[u8]) -> bool {
+    let head = &head[..head.len().min(TEXT_PROBE)];
+    !head.is_empty()
+        && !head.contains(&0)
+        && head
+            .iter()
+            .filter(|&&b| b < 0x20 && !matches!(b, b'\n' | b'\r' | b'\t'))
+            .count()
+            * 100
+            <= head.len()
+}
+
+/// The part of a file that is read. A file up to [`MAX_FILE_BYTES`] is
+/// read whole. A larger text file (a long CSV or Digilent Record-mode
+/// export, a VCD) is cut at the last full line before the limit, and the
+/// second value is `true`: the start of the record is shown. A larger
+/// binary file is refused.
+///
+/// # Errors
+/// A [`ReadError`] for a binary file over the limit.
+pub fn within_limit(bytes: &[u8]) -> Result<(&[u8], bool), ReadError> {
+    if bytes.len() <= MAX_FILE_BYTES {
+        return Ok((bytes, false));
+    }
+    if !looks_like_text(bytes) {
+        check_size(bytes.len())?;
+    }
+    let head = &bytes[..MAX_FILE_BYTES];
+    let end = head.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    if end == 0 {
+        check_size(bytes.len())?;
+    }
+    Ok((&bytes[..end], true))
+}
+
+/// Tell, in the warnings of `capture`, that only the start of a large file
+/// was read, and up to which time.
+pub fn note_cut(capture: &mut Capture) {
+    let until = capture
+        .time_span()
+        .map(|r| format!(" (up to t = {:.6} s)", r.end()))
+        .unwrap_or_default();
+    capture.warnings.insert(
+        0,
+        format!(
+            "the file is larger than {} MB: only its first {} MB are shown{until}",
+            MAX_FILE_BYTES / (1024 * 1024),
+            MAX_FILE_BYTES / (1024 * 1024)
+        ),
+    );
 }
 
 /// A nice V/div in the 1-2-5 sequence, for formats that do not store it:
@@ -217,6 +281,25 @@ mod tests {
         let mut b = vec![0xFFu8; 15_000];
         b[0] = 1;
         assert!(matches!(decide(&b), Decision::Ask(c) if c.len() == 1));
+    }
+
+    #[test]
+    fn text_over_the_limit_is_cut_at_a_line() {
+        let mut big = b"Time (s),CH1 (V)\n".to_vec();
+        let line = b"0.000001,1.25\n";
+        while big.len() <= MAX_FILE_BYTES + 100 {
+            big.extend_from_slice(line);
+        }
+        let (part, cut) = within_limit(&big).unwrap();
+        assert!(cut);
+        assert!(part.len() <= MAX_FILE_BYTES);
+        assert!(part.ends_with(b"\n"), "a whole line");
+        // Binary data over the limit is refused.
+        let mut bin = vec![0u8; MAX_FILE_BYTES + 1];
+        bin[..4].copy_from_slice(b"AG10");
+        assert!(within_limit(&bin).is_err());
+        // Small files are not touched.
+        assert_eq!(within_limit(b"abc").unwrap(), (&b"abc"[..], false));
     }
 
     #[test]

@@ -3791,7 +3791,7 @@ dependencies = [
 
 [[package]]
 name = "waveglance"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "binrw",
  "eframe",

@@ -1,7 +1,8 @@
 # WaveGlance
 
 A quick look at oscilloscope and logic analyzer files: FNIRSI `.wav` files,
-Keysight/Agilent and Rigol files, VCD files and CSV tables, with measurements,
+Keysight/Agilent and Rigol files, Digilent WaveForms (Analog Discovery)
+exports, VCD files and CSV tables, with measurements,
 cursors, FFT and UART, I2C and SPI decoders. It runs on the desktop and in a
 web browser (WebAssembly), with no installation:
 **<https://afmiguel.github.io/waveglance/>**.
@@ -20,7 +21,8 @@ The files you open are read in your browser: nothing is uploaded.
 ## Features
 
 - **Many file formats**, found automatically: FNIRSI DPOX180H and 1013D/1014D
-  `.wav`, Keysight/Agilent and Rigol `.bin`, Rigol `.wfm`, VCD and CSV (see
+  `.wav`, Keysight/Agilent and Rigol `.bin`, Rigol `.wfm`, Digilent WaveForms
+  (Analog Discovery) `.csv`/`.txt`, VCD and CSV (see
   [Supported files](#supported-files)).
 - **A scope screen**: 8 divisions with each channel at its own V/div and
   ground position (**Div**), or one axis in volts (**Volts**). Channel, time
@@ -240,8 +242,10 @@ mode, time cursors T1 and T2, automatic measurements and the Math channel.*
   already includes the probe setting).
 - If a file cannot be opened, a banner says why, and the file shown before
   stays. If the format is not certain, a window asks which one it is.
-- Files up to 256 MB are read (larger ones are refused with a message, on the
-  desktop before they are loaded). A VCD file may have up to 4096 signals and
+- Files up to 256 MB are read whole. Of a larger text file (a long CSV, a
+  Digilent Record-mode export, a VCD) the first 256 MB are read, cut at a
+  line, and a warning says up to which time; a larger binary file is refused
+  (on the desktop before it is loaded). A VCD file may have up to 4096 signals and
   20 million value changes. The FFT uses up to 1,048,576 samples of the span
   shown; when the span has more, the N readout says "N … of …" in orange and
   the FFT covers the first ones.
@@ -276,6 +280,8 @@ example when the pointer is on it).
 | Logic (VCD) | [I2C on two analog channels](https://afmiguel.github.io/waveglance/?example=vcd-i2c-analog) |
 | Logic (VCD) | [SPI: flash memory](https://afmiguel.github.io/waveglance/?example=vcd-spi-flash) |
 | Logic (VCD) | [SPI on two analog channels (no CS)](https://afmiguel.github.io/waveglance/?example=vcd-spi-analog) |
+| Digilent WaveForms | [Oscilloscope: RC filter step response](https://afmiguel.github.io/waveglance/?example=digilent-scope-rc-filter) |
+| Digilent WaveForms | [Logic Analyzer: I2C sensor and UART](https://afmiguel.github.io/waveglance/?example=digilent-logic-i2c-uart) |
 
 ## Supported files
 
@@ -289,6 +295,7 @@ window asks.
 | Keysight / Agilent | `.bin` (AG01, AG03, AG10) | Up to 4 channels; volts or amperes; no V/div in the file (a V/div that fits is used) |
 | Rigol | `.bin` (MSO5000 RG01, DHO800/1000 RG03) | Same layout as Keysight `.bin` |
 | Rigol | `.wfm` (DS1000Z, DS1000E/D, DS2000) | V/div, probe, coupling and time/div from the file; 8-bit samples. Logic analyzer data is not read |
+| Digilent WaveForms (Analog Discovery 1/2/3, Electronics Explorer, ADP) | `.csv`, `.txt` from File → Export of the Oscilloscope and the Logic Analyzer | Device name, sample rate, trigger, V/div, offset and attenuation from the `#` header. Logic Analyzer: `0`/`1` columns as digital lanes (ready for the decoders), bus and interpreter columns (`hFFF`, numbers) as value lanes, `X` as no value. The `.tdms` export is not read |
 | VCD | `.vcd` (logic analyzers, MSO, simulators) | 1-bit signals as digital lanes, buses (up to 64 bits) as value lanes, `real` variables as analog traces |
 | CSV / text, any oscilloscope | `.csv`, `.txt`: time + channel columns | Keysight, Rigol, Tektronix, Siglent layouts and this viewer's export; `,` `;` tab separators |
 

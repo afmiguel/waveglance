@@ -318,11 +318,32 @@ impl ScopeApp {
     }
 }
 
-/// Read a file on the desktop, after checking its size: a file over the
-/// limit is refused before it is loaded into memory.
+/// Read a file on the desktop. A file over the size limit is not loaded
+/// whole: a binary file is refused, and of a text file only the part that
+/// is read (see [`formats::within_limit`]) is loaded, plus one byte, so the
+/// reader knows the file was longer.
 #[cfg(not(target_arch = "wasm32"))]
 fn read_file(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
     let len = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
-    formats::check_size(usize::try_from(len).unwrap_or(usize::MAX)).map_err(|e| e.to_string())?;
-    std::fs::read(path).map_err(|e| e.to_string())
+    let limit = formats::MAX_FILE_BYTES as u64;
+    if len <= limit {
+        return std::fs::read(path).map_err(|e| e.to_string());
+    }
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut head = vec![0u8; 4096];
+    let n = file.read(&mut head).map_err(|e| e.to_string())?;
+    head.truncate(n);
+    if !formats::looks_like_text(&head) {
+        return Err(
+            formats::check_size(usize::try_from(len).unwrap_or(usize::MAX))
+                .err()
+                .map_or_else(String::new, |e| e.to_string()),
+        );
+    }
+    let mut bytes = head;
+    file.take(limit + 1 - bytes.len() as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    Ok(bytes)
 }
