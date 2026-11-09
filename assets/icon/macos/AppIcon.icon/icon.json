@@ -1,0 +1,19 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.04000,0.04000,0.04000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        { "glass" : true, "image-name" : "sine.png", "name" : "CH1 sine" },
+        { "glass" : true, "image-name" : "square.png", "name" : "CH2 square" },
+        { "glass" : false, "image-name" : "grid.png", "name" : "Grid" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.2 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WaveGlance
+GenericName=Waveform viewer
+Comment=View oscilloscope and logic analyzer files, with measurements, FFT and UART, I2C and SPI decoders
+Exec=waveglance %f
+Icon=waveglance
+Terminal=false
+Categories=Development;Electronics;Science;
+Keywords=oscilloscope;logic analyzer;waveform;VCD;FFT;UART;I2C;SPI;

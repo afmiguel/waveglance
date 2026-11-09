@@ -3791,7 +3791,7 @@ dependencies = [
 
 [[package]]
 name = "waveglance"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "binrw",
  "eframe",
@@ -3805,6 +3805,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "winresource",
 ]
 
 [[package]]
@@ -4436,6 +4437,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]

@@ -5,6 +5,33 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.32.0 — 2026-11-09
+
+Desktop programs that look and behave like real applications, and a safety
+net for reader bugs.
+
+- **Icons**, made from one drawing by `scripts/make-icons.py`, in the form
+  each system asks for:
+  - macOS: an Icon Composer file (compiled to `Assets.car`; macOS 26 shows
+    it with its own glass and shadow, instead of putting the icon on a grey
+    plate) and an `.icns` on Apple's grid for macOS 11 to 15;
+  - Windows: an `.ico` with 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80,
+    96 and 256 px, put in the `.exe` (with the version information);
+  - Linux: freedesktop (hicolor) sizes 16 to 512 px and SVG;
+  - browser: new favicon (SVG and ICO, a simpler drawing for the small
+    sizes), Apple touch icon, and a web manifest with normal and maskable
+    icons;
+  - the window of the desktop program has the icon too.
+- **Packages:** macOS gets `WaveGlance.app` (ad-hoc signed), Windows
+  `WaveGlance.exe`, Linux a `.tar.gz` with a menu entry (`.desktop`), the
+  icons and `install.sh` (user folders, no root).
+- **Command line:** `waveglance FILE` opens that file at start, so "Open
+  with" works on Windows and Linux.
+- **Reader bugs no longer close the program.** On the desktop an internal
+  error while a file is read shows in the banner (with "Open as…"); in the
+  browser, where it cannot be caught, a box tells what happened, names the
+  file and offers Reload and the link to report it.
+
 ## 0.31.1 — 2026-11-09
 
 Small fixes from the second pass of the independent review.

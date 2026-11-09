@@ -91,6 +91,19 @@ impl ScopeApp {
         }
     }
 
+    /// Open a file given by its path, as the main waveform (desktop: the
+    /// file named on the command line, or by "Open with" on Windows and
+    /// Linux). Errors show in the banner, like for any other file.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_path(&mut self, path: &std::path::Path) {
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let result = read_file(path);
+        let _ = self.inbox_tx.send((LoadTarget::Main, name, result));
+    }
+
     /// Show the "Open file" dialog (`rfd`) for the main waveform.
     pub(super) fn open_file_dialog(&mut self, ctx: &egui::Context) {
         self.open_dialog(ctx, LoadTarget::Main);

@@ -63,18 +63,50 @@ jobs:
       - name: Package
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#v}"
           dir="waveglance-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          bin="target/${{ matrix.target }}/release/waveglance-desktop"
+          docs="README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE"
           mkdir "$dir"
-          exe=""
-          if [ "${{ runner.os }}" = "Windows" ]; then exe=".exe"; fi
-          cp "target/${{ matrix.target }}/release/waveglance-desktop$exe" "$dir/waveglance$exe"
-          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "$dir/"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "$dir.zip" "$dir" > /dev/null
-          else
-            zip -qr "$dir.zip" "$dir"
-          fi
-          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+          case "${{ runner.os }}" in
+            macOS)
+              # An application bundle: WaveGlance.app, with the icon and
+              # Info.plist. Ad-hoc signed (no Apple ID), so macOS sees one
+              # whole, unchanged bundle.
+              app="$dir/WaveGlance.app"
+              mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+              cp "$bin" "$app/Contents/MacOS/WaveGlance"
+              # Assets.car: the icon of macOS 26 and later (Icon Composer);
+              # AppIcon.icns: macOS 11 to 15. Both made by make-icons.py.
+              cp assets/icon/macos/Assets.car assets/icon/macos/AppIcon.icns "$app/Contents/Resources/"
+              sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
+              plutil -lint "$app/Contents/Info.plist"
+              codesign --force --sign - "$app"
+              codesign --verify --verbose "$app"
+              cp $docs "$dir/"
+              # ditto keeps the bundle as macOS expects it.
+              ditto -c -k --keepParent "$dir" "$dir.zip"
+              echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              # The icon is in the .exe (build.rs).
+              cp "$bin.exe" "$dir/WaveGlance.exe"
+              cp $docs "$dir/"
+              7z a "$dir.zip" "$dir" > /dev/null
+              echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+              ;;
+            Linux)
+              # The program, its menu entry, the icons and an installer for
+              # the user's own folders. tar keeps the file permissions.
+              cp "$bin" "$dir/waveglance"
+              cp packaging/linux/waveglance.desktop packaging/linux/install.sh "$dir/"
+              mkdir "$dir/icons"
+              cp -R assets/icon/linux/hicolor "$dir/icons/"
+              cp $docs "$dir/"
+              tar -czf "$dir.tar.gz" "$dir"
+              echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+              ;;
+          esac
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -99,7 +131,7 @@ jobs:
       - name: Checksums
         run: |
           cd assets
-          sha256sum *.zip > SHA256SUMS.txt
+          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Notes from CHANGELOG.md
@@ -116,10 +148,19 @@ jobs:
           ---
           **Use it in the browser, with no installation:** https://afmiguel.github.io/waveglance/
 
-          **Desktop programs** (below): unzip and run `waveglance`. They are not
-          signed: on macOS, right-click the program and choose Open the first
-          time (or run `xattr -d com.apple.quarantine waveglance`); on Windows,
-          choose "More info" → "Run anyway" if SmartScreen asks.
+          **Desktop programs** (below). They are not signed with a paid
+          certificate, so the system asks once:
+          - **macOS:** unzip and move `WaveGlance.app` to Applications. The
+            first time, right-click it and choose Open (on macOS 15 and later:
+            System Settings → Privacy & Security → Open Anyway), or run
+            `xattr -dr com.apple.quarantine WaveGlance.app`.
+          - **Windows:** unzip and run `WaveGlance.exe`; if SmartScreen asks,
+            choose "More info" → "Run anyway".
+          - **Linux:** `tar xzf` the file, then run `./waveglance`, or
+            `./install.sh` to add it to the applications menu.
+
+          A file name on the command line opens that file:
+          `waveglance capture.wav`.
           EOF
           cat notes.md
 
@@ -129,4 +170,5 @@ jobs:
           body_path: notes.md
           files: |
             assets/*.zip
+            assets/*.tar.gz
             assets/SHA256SUMS.txt

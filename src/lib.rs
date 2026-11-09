@@ -33,7 +33,9 @@ mod web {
                 .expect("no element with id 'the_canvas_id'")
                 .dyn_into::<web_sys::HtmlCanvasElement>()
                 .expect("'the_canvas_id' is not a canvas");
-            let result = eframe::WebRunner::new()
+            let runner = eframe::WebRunner::new();
+            show_a_message_on_panic();
+            let result = runner
                 .start(
                     canvas,
                     eframe::WebOptions::default(),
@@ -44,5 +46,37 @@ mod web {
                 log::error!("failed to start the app: {e:?}");
             }
         });
+    }
+
+    /// In WebAssembly a panic stops the program and cannot be caught. Add a
+    /// step to the panic hook (after the one of eframe) that shows the
+    /// `#crash` box of `index.html`: what happened, the file being read,
+    /// a "Reload" button and where to report it.
+    fn show_a_message_on_panic() {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            previous(info);
+            let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let set = |id: &str, text: &str| {
+                if let Some(e) = document.get_element_by_id(id) {
+                    e.set_text_content(Some(text));
+                }
+            };
+            if let Some(file) = crate::app::file_being_read() {
+                set(
+                    "crash_file",
+                    &format!(
+                        "It happened while reading {file}. The file may be damaged, \
+                         or of a kind this viewer does not know."
+                    ),
+                );
+            }
+            set("crash_detail", &info.to_string());
+            if let Some(e) = document.get_element_by_id("crash") {
+                let _ = e.class_list().add_1("show");
+            }
+        }));
     }
 }

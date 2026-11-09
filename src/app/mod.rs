@@ -554,7 +554,14 @@ impl ScopeApp {
             self.report_open_error(&name, &e.to_string());
             return;
         }
-        match formats::decide(bytes) {
+        let decision = match guarded(&name, || formats::decide(bytes)) {
+            Ok(d) => d,
+            Err(e) => {
+                self.report_open_error(&name, &e);
+                return;
+            }
+        };
+        match decision {
             formats::Decision::Read(format) => self.read_as(target, name, bytes, format),
             formats::Decision::Ask(candidates) => {
                 let reason = if candidates.is_empty() {
@@ -582,7 +589,9 @@ impl ScopeApp {
         bytes: &[u8],
         format: &'static dyn formats::Format,
     ) {
-        match format.read(bytes) {
+        let result =
+            guarded(&name, || format.read(bytes)).unwrap_or_else(|e| Err(formats::ReadError(e)));
+        match result {
             Ok(w) if target == LoadTarget::Reference => {
                 self.reference = Some((name, w));
                 self.show_reference = true;
@@ -1104,6 +1113,44 @@ fn example_in_address() -> Option<String> {
 // Helpers of the submodules, for the parent, the other submodules and the tests.
 use self::{decoder::*, format::*, plot::*, readouts::*};
 
+thread_local! {
+    /// The file being read, for the crash message of the web version.
+    static READING: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// The name of the file being read now, if any (the web version shows it
+/// when the program stops on an internal error).
+pub fn file_being_read() -> Option<String> {
+    READING.with(|r| r.borrow().clone())
+}
+
+/// Run a step of reading a file, and turn an internal error (a panic) into
+/// an error message, so a damaged or unusual file cannot close the program.
+///
+/// On the desktop the panic is caught. In WebAssembly a panic cannot be
+/// caught; there the panic hook in `lib.rs` shows a message with the name
+/// of the file, kept here while it is read.
+fn guarded<T>(name: &str, step: impl FnOnce() -> T) -> Result<T, String> {
+    READING.with(|r| *r.borrow_mut() = Some(name.to_owned()));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(step));
+    READING.with(|r| *r.borrow_mut() = None);
+    result.map_err(|payload| {
+        let detail = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        log::error!("internal error while reading {name}: {detail}");
+        format!(
+            "internal error in the reader ({detail}). The file may be damaged, or of a \
+             kind this viewer does not know. Please report it at {ISSUES}"
+        )
+    })
+}
+
+/// Where to report problems.
+pub const ISSUES: &str = "https://github.com/afmiguel/waveglance/issues";
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1306,5 +1353,17 @@ mod tests {
         // A view inside one segment: only that segment.
         let inside = super::plot::bus_segments(&p, &(12.0..=15.0), 0.01);
         assert_eq!(inside, [seg(10.2, 20.0, Some(4.0))]);
+    }
+
+    #[test]
+    fn a_panic_while_reading_becomes_an_error() {
+        use super::{ISSUES, file_being_read, guarded};
+        let r: Result<(), String> = guarded("bad.wav", || panic!("index out of bounds"));
+        let e = r.unwrap_err();
+        assert!(e.contains("index out of bounds"), "{e}");
+        assert!(e.contains(ISSUES), "{e}");
+        // The name is kept only while the file is read.
+        assert_eq!(file_being_read(), None);
+        assert_eq!(guarded("ok.wav", || 7), Ok(7));
     }
 }

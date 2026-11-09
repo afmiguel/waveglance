@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS application bundle. The release workflow replaces @VERSION@. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>WaveGlance</string>
+    <key>CFBundleDisplayName</key>
+    <string>WaveGlance</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.github.afmiguel.waveglance</string>
+    <key>CFBundleExecutable</key>
+    <string>WaveGlance</string>
+    <!-- macOS 26 and later: AppIcon in Assets.car (Icon Composer file).
+         macOS 11 to 15: AppIcon.icns. -->
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>WaveGlance. MIT OR Apache-2.0.</string>
+</dict>
+</plist>

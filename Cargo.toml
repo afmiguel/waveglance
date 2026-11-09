@@ -1,6 +1,6 @@
 [package]
 name = "waveglance"
-version = "0.31.1"
+version = "0.32.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/afmiguel/waveglance"
@@ -38,7 +38,11 @@ env_logger = "=0.11.11"
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "=0.4.80"
 js-sys = "=0.3.107"
-web-sys = { version = "=0.3.107", features = ["Window", "Document", "HtmlCanvasElement", "Element", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement", "HtmlElement", "DomTokenList", "Location"] }
+web-sys = { version = "=0.3.107", features = ["Window", "Document", "HtmlCanvasElement", "Element", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement", "HtmlElement", "DomTokenList", "Location", "Node"] }
+
+# Windows: the icon and version information of the .exe (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "=0.1.34", default-features = false }
 
 [profile.release]
 opt-level = 2

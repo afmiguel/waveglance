@@ -5,9 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <title>WaveGlance</title>
     <meta name="description" content="WaveGlance: a quick look at oscilloscope and logic analyzer files (FNIRSI, Keysight, Rigol, VCD, CSV) with measurements, cursors, FFT and UART, I2C and SPI decoders. Runs in the browser; files stay on your device." />
+    <!-- Icons: made by scripts/make-icons.py. -->
     <link data-trunk rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link data-trunk rel="copy-file" href="assets/favicon.ico" />
     <link data-trunk rel="copy-file" href="assets/favicon.png" />
-    <link rel="alternate icon" href="favicon.png" type="image/png" />
+    <link data-trunk rel="copy-file" href="assets/apple-touch-icon.png" />
+    <link data-trunk rel="copy-file" href="assets/icon-192.png" />
+    <link data-trunk rel="copy-file" href="assets/icon-512.png" />
+    <link data-trunk rel="copy-file" href="assets/icon-maskable-512.png" />
+    <link data-trunk rel="copy-file" href="assets/manifest.webmanifest" />
+    <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#0a0a0a" />
     <!-- Trunk builds the crate (lib.rs, #[wasm_bindgen(start)]) into this page. -->
     <link data-trunk rel="rust" data-target-name="waveglance" data-wasm-opt="z" />
     <style>
@@ -21,10 +31,35 @@
             body.printing #the_canvas_id { display: none !important; }
             body.printing #print_image { display: block; width: 100%; height: auto; }
         }
+        /* Shown by the panic hook (lib.rs) if the program stops on an internal error. */
+        #crash { display: none; position: fixed; inset: 0; background: rgba(10,10,10,0.92);
+                 color: #e8e8e8; font: 15px/1.5 system-ui, -apple-system, sans-serif;
+                 align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+        #crash.show { display: flex; }
+        #crash .box { max-width: 560px; width: 100%; background: #1b1b1b; border: 1px solid #444;
+                      border-radius: 10px; padding: 20px 22px; }
+        #crash h1 { font-size: 18px; margin: 0 0 8px; color: #ffeb00; }
+        #crash p { margin: 6px 0; }
+        #crash a { color: #00e6ff; }
+        #crash button { margin-top: 10px; font: inherit; padding: 6px 16px; border-radius: 6px;
+                        border: 1px solid #00e6ff; background: #00323a; color: #e8e8e8; cursor: pointer; }
+        #crash pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #9a9a9a;
+                     background: #111; padding: 8px; border-radius: 6px; max-height: 120px; overflow: auto; }
     </style>
 </head>
 <body>
     <canvas id="the_canvas_id"></canvas>
     <img id="print_image" alt="WaveGlance screen" />
+    <div id="crash" role="alert">
+        <div class="box">
+            <h1>WaveGlance stopped on an internal error</h1>
+            <p id="crash_file">This is a bug in WaveGlance.</p>
+            <p>Your files were not sent anywhere. Reload the page to continue.</p>
+            <button type="button" onclick="location.reload()">Reload</button>
+            <p>Please report it, with the file if you can, at
+               <a href="https://github.com/afmiguel/waveglance/issues" target="_blank" rel="noopener">github.com/afmiguel/waveglance/issues</a>.</p>
+            <pre id="crash_detail"></pre>
+        </div>
+    </div>
 </body>
 </html>

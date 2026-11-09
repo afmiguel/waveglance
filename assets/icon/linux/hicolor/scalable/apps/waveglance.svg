@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- WaveGlance icon: a small scope screen with a yellow sine (CH1) and a cyan square wave (CH2). Made by scripts/make-icons.py. -->
+  <rect x="1.50" y="1.50" width="60.99" height="60.99" rx="10.02" fill="#0a0a0a" stroke="#5a5a5a" stroke-width="3.01"/>
+  <path d="M32 8 V56 M8 32 H56" stroke="#3a3a3a" stroke-width="1.41"/>
+  <path d="M8.00 44.16 L17.92 44.16 L17.92 19.84 L32.00 19.84 L32.00 44.16 L46.08 44.16 L46.08 19.84 L56.00 19.84" fill="none" stroke="#00e6ff" stroke-width="3.01" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.00 32.00 L9.00 29.19 L10.00 26.45 L11.00 23.85 L12.00 21.48 L13.00 19.39 L14.00 17.63 L15.00 16.26 L16.00 15.31 L17.00 14.80 L18.00 14.76 L19.00 15.17 L20.00 16.04 L21.00 17.33 L22.00 19.01 L23.00 21.04 L24.00 23.36 L25.00 25.91 L26.00 28.63 L27.00 31.43 L28.00 34.26 L29.00 37.02 L30.00 39.64 L31.00 42.07 L32.00 44.22 L33.00 46.05 L34.00 47.50 L35.00 48.54 L36.00 49.13 L37.00 49.27 L38.00 48.95 L39.00 48.17 L40.00 46.96 L41.00 45.36 L42.00 43.39 L43.00 41.13 L44.00 38.61 L45.00 35.92 L46.00 33.13 L47.00 30.31 L48.00 27.53 L49.00 24.87 L50.00 22.40 L51.00 20.19 L52.00 18.29 L53.00 16.76 L54.00 15.64 L55.00 14.95 L56.00 14.72" fill="none" stroke="#ffeb00" stroke-width="4.00" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

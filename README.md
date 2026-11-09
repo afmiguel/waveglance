@@ -320,10 +320,33 @@ with the file and, if you can, a photo of the instrument screen. Suggestions
 ## Desktop programs
 
 The [Releases](https://github.com/afmiguel/waveglance/releases) page has
-programs for macOS (Apple Silicon and Intel), Windows and Linux: unzip and run
-`waveglance`. They are not signed: on macOS, right-click the program and choose
-Open the first time; on Windows, choose "More info" → "Run anyway" if
-SmartScreen asks. The browser version has the same functions.
+programs for macOS (Apple Silicon and Intel), Windows and Linux. The browser
+version has the same functions.
+
+- **macOS** (11 or later): unzip and move `WaveGlance.app` to Applications.
+- **Windows** (10 or 11, 64-bit): unzip and run `WaveGlance.exe`.
+- **Linux** (x86-64): `tar xzf` the file, then run `./waveglance`, or
+  `./install.sh` to add WaveGlance to the applications menu (in your own
+  folders, no root; `./install.sh --remove` takes it out).
+
+The programs are not signed with a paid certificate, so the system asks once.
+On macOS, right-click the app and choose Open the first time (on macOS 15 and
+later: System Settings → Privacy & Security → Open Anyway), or run
+`xattr -dr com.apple.quarantine WaveGlance.app`. On Windows, choose
+"More info" → "Run anyway" if SmartScreen asks.
+
+A file name on the command line opens that file (`waveglance capture.wav`), so
+"Open with" works on Windows and Linux.
+
+If a reader stops on an internal error (a bug), WaveGlance shows a message
+instead of closing: on the desktop in the banner, in the browser in a box with
+a Reload button. Please report it, with the file if you can.
+
+The icons are made from one drawing by `scripts/make-icons.py`, in the form
+each system asks for: an Icon Composer file for macOS 26 and an `.icns` for
+macOS 11 to 15, an `.ico` with the Windows sizes (16 to 256 px), the
+freedesktop icon sizes for Linux, and the favicon, Apple touch icon and
+manifest icons for the browser.
 
 ## Build and run
 
