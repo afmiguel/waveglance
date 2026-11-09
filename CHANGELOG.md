@@ -5,6 +5,12 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.30.1 — 2026-11-08
+
+- Release workflow: the macOS programs are built on `macos-latest` (the
+  `macos-14` runners did not start), so the Releases page has the programs for
+  macOS, Windows and Linux.
+
 ## 0.30.0 — 2026-11-08
 
 - **License: MIT or Apache-2.0**, at your option (`LICENSE-MIT`,
