@@ -1,6 +1,6 @@
 [package]
 name = "waveglance"
-version = "0.28.1"
+version = "0.28.2"
 edition = "2024"
 repository = "https://github.com/afmiguel/waveglance"
 homepage = "https://afmiguel.github.io/waveglance/"

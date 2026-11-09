@@ -5,6 +5,15 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.28.2 — 2026-11-08
+
+- Cleanup. The five README screenshots of VCD files are new (they showed the
+  old name in the title bar), and the nine README images are compressed
+  (1.8 MB → 0.8 MB).
+- `scripts/fetch-samples.sh` downloads only the 45 Rigol files that the tests
+  use (it copied 114; about 100 MB less in `tests/data/`).
+- Removed the decoder setting `source`, left from the one-line decoder.
+
 ## 0.28.1 — 2026-11-08
 
 - Texts that still described a FNIRSI-only viewer: the welcome screen (it now

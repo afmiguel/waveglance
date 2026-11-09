@@ -221,8 +221,6 @@ impl Protocol {
 #[serde(default)]
 pub struct Settings {
     pub protocol: Protocol,
-    /// Index of the trace with the data (0 = the first trace of the file).
-    pub source: usize,
     /// Threshold of an analog trace, in its unit; `None` = automatic.
     pub threshold: Option<f64>,
     pub uart: uart::Settings,
@@ -233,7 +231,6 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             protocol: Protocol::Off,
-            source: 0,
             threshold: None,
             uart: uart::Settings::default(),
             spi: spi::Settings::default(),

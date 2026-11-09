@@ -58,13 +58,27 @@ cp "$TMP3"/tests/files/bin/agilent_* "$DEST3/"
 echo "Copied $(find "$DEST3" -name '*.bin' | wc -l | tr -d ' ') files to $DEST3"
 
 # Rigol .bin and .wfm files, with the CSV files that the scopes exported for
-# some of them (same repository and commit).
+# some of them (same repository and commit): only the files that
+# tests/rigol_samples.rs uses (by name, or as "{name}.wfm" and "{name}.csv").
 DEST4="$ROOT/tests/data/rigol"
 mkdir -p "$DEST4"
-cp "$TMP3"/tests/files/bin/MSO50* "$TMP3"/tests/files/bin/DHO* "$DEST4/"
-cp "$TMP3"/tests/files/wfm/DS1054Z-* "$TMP3"/tests/files/wfm/DS1074Z-* "$TMP3"/tests/files/wfm/DS1202Z-E.wfm \
-   "$TMP3"/tests/files/wfm/MSO1104.wfm "$TMP3"/tests/files/wfm/DZ1104Z-A.wfm \
-   "$TMP3"/tests/files/wfm/DS1000E-* "$TMP3"/tests/files/wfm/DS1052E.* "$TMP3"/tests/files/wfm/DS1102E-* \
-   "$TMP3"/tests/files/wfm/DS1102D-* "$TMP3"/tests/files/wfm/DS2072A-* "$TMP3"/tests/files/wfm/DS2000-* \
-   "$TMP3"/tests/files/wfm/DS2202.wfm "$DEST4/"
-echo "Copied $(find "$DEST4" -name '*.wfm' -o -name '*.bin' | wc -l | tr -d ' ') files to $DEST4"
+for f in \
+  DHO824-ch1.bin DHO824-ch12.bin DHO824-ch1234.bin DS1052E.wfm \
+  DS1054Z-A.csv DS1054Z-A.wfm DS1054Z-B.csv DS1054Z-B.wfm \
+  DS1054Z-C.csv DS1054Z-C.wfm DS1054Z-D.csv DS1054Z-ch1SquareCH2Uart.csv \
+  DS1054Z-ch1SquareCH2Uart.wfm DS1054Z-ch1SquareCH4Uart.csv DS1054Z-ch1SquareCH4Uart.wfm DS1074Z-A.wfm \
+  DS1074Z-B.wfm DS1074Z-C.wfm DS1102D-A.csv DS1102D-A.wfm \
+  DS1102E-B.csv DS1102E-B.wfm DS1102E-D.csv DS1102E-D.wfm \
+  DS1202Z-E.wfm DS2000-A.wfm DS2072A-1.csv DS2072A-1.wfm \
+  DS2072A-3.csv DS2072A-3.wfm DS2072A-4.csv DS2072A-5.csv \
+  DS2072A-5.wfm DS2072A-6.csv DS2072A-6.wfm DS2072A-7.csv \
+  DS2072A-7.wfm DS2072A-9.csv DS2072A-9.wfm DS2202.wfm \
+  MSO1104.wfm MSO5000-A.bin MSO5000-B.bin MSO5074-A.bin \
+  MSO5074-B.bin; do
+  if [ -f "$TMP3/tests/files/bin/$f" ]; then
+    cp "$TMP3/tests/files/bin/$f" "$DEST4/"
+  else
+    cp "$TMP3/tests/files/wfm/$f" "$DEST4/"
+  fi
+done
+echo "Copied $(find "$DEST4" -type f | wc -l | tr -d ' ') files to $DEST4"
