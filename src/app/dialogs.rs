@@ -3,81 +3,77 @@
 use super::*;
 
 impl ScopeApp {
-    /// The splash screen: what the app does, its version, and the controls.
-    /// "Don't show this at startup" is saved; the Help button has the full
-    /// instructions.
+    /// The splash screen: what the app does, its version, the built-in
+    /// examples (a click opens one) and the controls. "Don't show this at
+    /// startup" is saved; the Help button has the full instructions.
     pub(super) fn splash(&mut self, ctx: &egui::Context) {
         if !self.splash_open {
             return;
         }
         let mut open_file = false;
-        let modal =
-            egui::Modal::new(egui::Id::unique("splash")).show(ctx, |ui| {
-                ui.set_max_width(460.0);
-                ui.heading("WaveGlance");
-                ui.label(
-                    RichText::new(format!("Version {VERSION} · commit {GIT_HASH}"))
-                        .small()
-                        .color(palette::hint()),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    "A quick look at oscilloscope and logic analyzer files: FNIRSI DPOX180H and \
-                 1013D/1014D (.wav), Keysight/Agilent (.bin), Rigol (.bin, .wfm), VCD, and CSV \
-                 files from any oscilloscope. Measurements, cursors, FFT, Math, search, and \
-                 UART, I2C and SPI decoders. The files are read on this device: nothing is \
-                 uploaded.",
-                );
-                ui.add_space(8.0);
-                ui.label(RichText::new("Controls").strong());
-                egui::Grid::new("splash_controls")
-                .num_columns(2)
-                .spacing([16.0, 4.0])
-                .striped(true)
+        let mut example: Option<&'static examples::Example> = None;
+        let screen = ctx.content_rect();
+        let max_height = screen.height() * 0.85;
+        // As wide as the screen allows (a phone), at most 680 points.
+        let width = (screen.width() - 32.0).clamp(150.0, 680.0);
+        let modal = egui::Modal::new(egui::Id::unique("splash")).show(ctx, |ui| {
+            ui.set_width(width);
+            ui.heading(RichText::new("WaveGlance").strong());
+            ui.label(
+                RichText::new(format!("v{VERSION} · commit {GIT_HASH}"))
+                    .small()
+                    .color(palette::hint()),
+            );
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical()
+                .max_height((max_height - 170.0).max(120.0))
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    for (what, does) in [
-                        ("Mouse wheel", "Zoom (Shift: time only, Alt: volts only)"),
-                        ("Wheel on an axis", "Pan along that axis"),
-                        ("Drag", "Pan"),
-                        ("Double-click", "Reset the view"),
-                        ("Drag a dashed line", "Move a cursor (⌖ Cursors menu)"),
-                        ("Drag 1▶ / 2▶", "Move that channel up or down (switches Y to Div)"),
-                        ("Click CH1 / CH2 readout", "Hide or show the channel"),
-                        ("Touch", "Pinch: zoom · drag: pan · double-tap: reset"),
-                        (
-                            "Keys",
-                            "F fit · Z zoom view · S FFT · C cursors · Tab + arrows move a cursor",
-                        ),
-                        ("Esc", "Close this screen or an error message"),
-                    ] {
-                        ui.label(RichText::new(what).monospace());
-                        ui.label(does);
-                        ui.end_row();
+                    ui.label(
+                        "A quick look at oscilloscope and logic analyzer files: FNIRSI DPOX180H and \
+                         1013D/1014D (.wav), Keysight/Agilent (.bin), Rigol (.bin, .wfm), VCD, and CSV \
+                         files from any oscilloscope. Measurements, cursors, FFT, Math, search, and \
+                         UART, I2C and SPI decoders. The files are read on this device: nothing is \
+                         uploaded.",
+                    );
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Try an example").strong().size(15.0));
+                    ui.label(
+                        RichText::new("Click one to open it. File ▾ → Open example has them too.")
+                            .small()
+                            .color(palette::hint()),
+                    );
+                    ui.add_space(4.0);
+                    if let Some(e) = example_cards(ui) {
+                        example = Some(e);
                     }
+                    ui.add_space(6.0);
+                    egui::CollapsingHeader::new(RichText::new("Controls").strong())
+                        .default_open(false)
+                        .show(ui, controls_grid);
                 });
-                ui.add_space(8.0);
-                ui.checkbox(&mut self.hide_splash, "Don't show this at startup");
-                ui.label(
-                    RichText::new("The Help button shows these controls and more.")
-                        .small()
-                        .color(palette::hint()),
-                );
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.button("⏏ Open file…").clicked() {
-                        open_file = true;
-                    }
-                    if ui.button("? Help").clicked() {
-                        self.splash_open = false;
-                        self.help_open = true;
-                    }
-                    if ui.button("Close").clicked() {
-                        self.splash_open = false;
-                    }
-                });
+            ui.add_space(8.0);
+            ui.checkbox(&mut self.hide_splash, "Don't show this at startup");
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("⏏ Open file…").clicked() {
+                    open_file = true;
+                }
+                if ui.button("? Help").clicked() {
+                    self.splash_open = false;
+                    self.help_open = true;
+                }
+                if ui.button("Close").clicked() {
+                    self.splash_open = false;
+                }
             });
+        });
         if modal.should_close() {
             self.splash_open = false;
+        }
+        if let Some(e) = example {
+            self.splash_open = false;
+            self.load_bytes(e.file.to_owned(), e.bytes);
         }
         if open_file {
             self.splash_open = false;
@@ -88,6 +84,7 @@ impl ScopeApp {
     /// The Help window: the main instructions, in short sections.
     pub(super) fn help(&mut self, ctx: &egui::Context) {
         let mut open = self.help_open;
+        let mut welcome = false;
         egui::Window::new("Help")
             .open(&mut open)
             .default_width(480.0)
@@ -95,8 +92,19 @@ impl ScopeApp {
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
+                if ui
+                    .button("☰ Welcome screen and examples")
+                    .on_hover_text("The welcome screen, with the built-in examples")
+                    .clicked()
+                {
+                    welcome = true;
+                }
                 egui::ScrollArea::vertical().show(ui, help_text);
             });
+        if welcome {
+            open = false;
+            self.splash_open = true;
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             open = false;
         }
@@ -321,7 +329,7 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
         "Open a file",
         &[
             "Drop a file on the window, or use ⏏ File ▾ → Open file….",
-            "File ▾ → Open example: real FNIRSI DPOX180H, 1013D and Rigol captures, and VCD files (a CPU bus, a DAC, UART, I2C and SPI) to try the viewer without a scope.",
+            "File ▾ → Open example, or the welcome screen (button at the top of this window): real FNIRSI DPOX180H, 1013D and Rigol captures, and VCD files (a CPU bus, a DAC, UART, I2C and SPI) to try the viewer without a scope.",
             "Supported: FNIRSI DPOX180H, FNIRSI 1013D/1014D (original firmware), Keysight/Agilent .bin, Rigol .bin and .wfm (DS1000Z, DS1000E/D, DS2000), VCD (logic analyzers: digital signals and buses in lanes at the bottom), and CSV/text tables from any oscilloscope (Keysight, Rigol, Tektronix, Siglent… and this viewer's own export). The format is found automatically; the maker and model are shown at the top left.",
             "If the format is not certain, a window asks which one it is. If a file cannot be read, the red banner has an \"Open as…\" button to choose the format yourself.",
             "CSV: the first number column is the time (s), the others are channels; the names come from the header line. Files with up to millions of samples are drawn fast: only the part in view, at about two points per pixel.",
@@ -439,4 +447,135 @@ pub(super) fn help_text(ui: &mut egui::Ui) {
             "Esc: close this window, the welcome screen or an error message.",
         ],
     );
+}
+
+/// The controls of the viewer, for the welcome screen.
+fn controls_grid(ui: &mut egui::Ui) {
+    egui::Grid::new("splash_controls")
+        .num_columns(2)
+        .spacing([16.0, 4.0])
+        .striped(true)
+        .show(ui, |ui| {
+            for (what, does) in [
+                ("Mouse wheel", "Zoom (Shift: time only, Alt: volts only)"),
+                ("Wheel on an axis", "Pan along that axis"),
+                ("Drag", "Pan"),
+                ("Double-click", "Reset the view"),
+                ("Drag a dashed line", "Move a cursor (⌖ Cursors menu)"),
+                (
+                    "Drag 1▶ / 2▶",
+                    "Move that channel up or down (switches Y to Div)",
+                ),
+                ("Click CH1 / CH2 readout", "Hide or show the channel"),
+                ("Touch", "Pinch: zoom · drag: pan · double-tap: reset"),
+                (
+                    "Keys",
+                    "F fit · Z zoom view · S FFT · C cursors · Tab + arrows move a cursor",
+                ),
+                ("Esc", "Close this screen or an error message"),
+            ] {
+                ui.label(RichText::new(what).monospace());
+                ui.label(does);
+                ui.end_row();
+            }
+        });
+}
+
+/// The built-in examples as cards, by group (two columns when there is
+/// room). Returns the example that was clicked.
+fn example_cards(ui: &mut egui::Ui) -> Option<&'static examples::Example> {
+    let mut clicked = None;
+    let gap = 8.0;
+    let width = ui.available_width();
+    let columns = if width >= 520.0 { 2 } else { 1 };
+    let card_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+    for g in examples::GROUPS {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(group_icon(g.name)).color(palette::hint()));
+            ui.label(RichText::new(g.name).strong());
+        });
+        let items: Vec<&examples::Example> = examples::EXAMPLES
+            .iter()
+            .filter(|e| e.group == g.name)
+            .collect();
+        for row in items.chunks(columns) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for e in row {
+                    if example_card(ui, e, card_width).clicked() {
+                        clicked = Some(*e);
+                    }
+                }
+            });
+        }
+        ui.label(RichText::new(g.credit).small().color(palette::hint()));
+    }
+    clicked
+}
+
+/// A mark for an example group: a waveform for scope captures, a logic
+/// signal for the VCD files.
+fn group_icon(group: &str) -> &'static str {
+    if group.contains("VCD") { "⇄" } else { "∿" }
+}
+
+/// One example as a card: its name and file type; the description on
+/// hover; it lights up under the pointer.
+fn example_card(ui: &mut egui::Ui, e: &examples::Example, width: f32) -> egui::Response {
+    let height = 30.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let visuals = ui.visuals();
+    let hovered = response.hovered();
+    let (fill, stroke) = if hovered {
+        (
+            visuals.widgets.hovered.weak_bg_fill,
+            egui::Stroke::new(1.0, visuals.selection.stroke.color),
+        )
+    } else {
+        (
+            visuals.faint_bg_color,
+            visuals.widgets.noninteractive.bg_stroke,
+        )
+    };
+    let painter = ui.painter();
+    painter.rect(rect, 6.0, fill, stroke, egui::StrokeKind::Inside);
+    let text_color = if hovered {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    // The file type, as a small tag on the right.
+    let ext = e.file.rsplit('.').next().unwrap_or("").to_uppercase();
+    let tag_font = egui::FontId::monospace(10.0);
+    let tag = painter.layout_no_wrap(ext, tag_font, palette::hint());
+    let tag_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            rect.right() - tag.size().x - 14.0,
+            rect.center().y - tag.size().y / 2.0 - 2.0,
+        ),
+        tag.size() + egui::vec2(8.0, 4.0),
+    );
+    painter.rect_stroke(
+        tag_rect,
+        4.0,
+        egui::Stroke::new(1.0, palette::hint().gamma_multiply(0.6)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(tag_rect.min + egui::vec2(4.0, 2.0), tag, palette::hint());
+    // The name, cut with … if it does not fit.
+    let font = egui::FontId::proportional(13.5);
+    let room = tag_rect.left() - rect.left() - 20.0;
+    let mut job = egui::text::LayoutJob::simple_singleline(e.label.to_owned(), font, text_color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    painter.galley(
+        egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text_color,
+    );
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response.on_hover_text(e.about)
 }

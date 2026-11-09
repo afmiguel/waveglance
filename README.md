@@ -153,8 +153,8 @@ is no room above it in the 8 divisions.*
   chosen; 5 to 9 data bits; parity None, Even or Odd; 1 or 2 stop bits; idle
   high, or low (an inverted line, such as RS-232 before the transceiver).
 - A line is a channel of the oscilloscope or a VCD signal. The settings are
-  kept by the name of the line, so they come back with the next file that has
-  a line with that name. An analog channel is made into 0 and 1 with a
+  kept by the name of the line: check the line again in the next file and they
+  come back. A new file opens with no line decoded. An analog channel is made into 0 and 1 with a
   threshold (in its ▸ settings): automatic (the middle of the
   signal, with hysteresis) or a value in volts.
 - The words are drawn just above the decoded signal (a small band, 22 points
@@ -254,8 +254,9 @@ format, and FNIRSI does not publish them. Other FNIRSI models (2C53T, 2C53P,
 - Drop a file on the window, or use **⏏ File ▾ → Open file…** (Ctrl/⌘+O).
 - **File ▾ → Open example**: real FNIRSI DPOX180H and 1013D captures, Rigol captures, and VCD
   files made for the viewer (a CPU bus, a DAC, and UART, I2C and SPI examples).
-- The welcome screen lists all the controls; **? Help** (F1) has the main
-  instructions.
+- The welcome screen lists the built-in examples as cards (a click opens one)
+  and the controls; **? Help** (F1) has the main instructions and a button to
+  open the welcome screen again.
 - Keyboard: Ctrl/⌘+O open, Ctrl/⌘+P print, F1 help, F/H/V fit, Z zoom view,
   S FFT, Y volts/div, C cursors, Tab + arrows move a cursor, 1/2 hide a
   channel, +/− zoom, arrows pan, [ and ] previous/next search result.

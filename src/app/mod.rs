@@ -603,6 +603,13 @@ impl ScopeApp {
                 self.file_name = Some(name);
                 self.load_count += 1;
                 self.marker_drag = None;
+                // A file is open: the welcome screen is no longer needed.
+                self.splash_open = false;
+                // A new file: no line is decoded until it is checked again
+                // (each line keeps its settings, by name).
+                for d in &mut self.decoders {
+                    d.on = false;
+                }
                 // Open on the scope screen window when the file has it (the
                 // record can be longer, like 30 divisions for 12 on screen).
                 let screen = self.screen_window();
@@ -969,10 +976,6 @@ impl eframe::App for ScopeApp {
         self.handle_dropped_files(&ctx);
         self.receive_loaded_files();
         self.update_search();
-        // A file was dropped or opened: the splash screen is no longer needed.
-        if self.waveform.is_some() && self.load_count == 1 && self.splash_open {
-            self.splash_open = false;
-        }
         self.splash(&ctx);
         self.print_window(&ctx);
         self.format_window(&ctx);

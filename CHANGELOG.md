@@ -5,6 +5,21 @@ raises the minor number (0.2.0 → 0.3.0), a fix raises the patch number
 (0.2.0 → 0.2.1). Each release has a git tag `vX.Y.Z`. The app shows its
 version next to the title; hover it to see the git commit of the build.
 
+## 0.29.0 — 2026-11-08
+
+- **Examples on the welcome screen.** The welcome screen lists the 17
+  built-in examples as cards, by source (FNIRSI DPOX180H, FNIRSI 1013D, Rigol,
+  Logic (VCD)), with the file type on each card and the description on hover;
+  a click opens the example. Two columns on a wide screen, one on a phone;
+  the controls are now in a "Controls" section that opens with a click.
+- Help has a button to open the welcome screen again (also when "Don't show
+  this at startup" is checked).
+- A new file opens with no line decoded: a decoder set on a line named CH1 in
+  one file no longer turns on by itself in another file with a CH1 (the
+  settings of each line are kept; check the line again).
+- Fix: the welcome screen could not be shown again once the first file was
+  open.
+
 ## 0.28.2 — 2026-11-08
 
 - Cleanup. The five README screenshots of VCD files are new (they showed the
